@@ -15,6 +15,8 @@ from resnet_2d3d import neq_load_customized
 from augmentation import *
 from utils import AverageMeter, ConfusionMeter, save_checkpoint, write_log, calc_topk_accuracy, denorm, calc_accuracy
 
+import geoopt
+
 import torch
 import torch.optim as optim
 from torch.utils import data
@@ -90,7 +92,8 @@ def main():
 
     if params is None: params = model.parameters()
 
-    optimizer = optim.Adam(params, lr=args.lr, weight_decay=args.wd)
+    # optimizer = optim.Adam(params, lr=args.lr, weight_decay=args.wd)
+    optimizer = geoopt.optim.RiemannianAdam(params, lr=args.lr, weight_decay=args.wd, stabilize=10)
     if args.dataset == 'hmdb51':
         lr_lambda = lambda ep: MultiStepLR_Restart_Multiplier(ep, gamma=0.1, step=[150,250,300], repeat=1)
     elif args.dataset == 'ucf101':

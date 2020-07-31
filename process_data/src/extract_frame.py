@@ -89,15 +89,40 @@ def main_kinetics400(v_root, f_root, dim=150):
             if os.path.exists(out_dir): print(out_dir, 'exists!'); continue
             print('extracting: %s' % v_class)
             # dim = 150 (crop to 128 later) or 256 (crop to 224 later)
-            Parallel(n_jobs=32)(delayed(extract_video_opencv)(p, f_root_real, dim=dim) for p in tqdm(v_paths, total=len(v_paths))) 
+            Parallel(n_jobs=32)(delayed(extract_video_opencv)(p, f_root_real, dim=dim) for p in tqdm(v_paths, total=len(v_paths)))
+
+
+def main_kinetics600(v_root, f_root, dim=150):
+    print('extracting Kinetics600 ... ')
+    for basename in ['train', 'val', 'test']:
+        v_root_real = v_root + '/' + basename
+        if not os.path.exists(v_root_real):
+            print('Wrong v_root'); sys.exit()
+        f_root_real = f_root + '/' + basename
+        print('Extract to: \nframe: %s' % f_root_real)
+        if not os.path.exists(f_root_real): os.makedirs(f_root_real)
+        v_act_root = glob.glob(os.path.join(v_root_real, '*/'))
+        v_act_root = sorted(v_act_root)
+
+        # if resume, remember to delete the last video folder
+        for i, j in tqdm(enumerate(v_act_root), total=len(v_act_root)):
+            v_paths = glob.glob(os.path.join(j, '*.mp4'))
+            v_paths = sorted(v_paths)
+            # for resume:
+            v_class = j.split('/')[-2]
+            out_dir = os.path.join(f_root_real, v_class)
+            if os.path.exists(out_dir): print(out_dir, 'exists!'); continue
+            print('extracting: %s' % v_class)
+            # dim = 150 (crop to 128 later) or 256 (crop to 224 later)
+            Parallel(n_jobs=32)(delayed(extract_video_opencv)(p, f_root_real, dim=dim) for p in tqdm(v_paths, total=len(v_paths)))
 
 
 if __name__ == '__main__':
     # v_root is the video source path, f_root is where to store frames
     # edit 'your_path' here: 
     
-    main_UCF101(v_root='your_path/UCF101/videos',
-                f_root='your_path/UCF101/frame')
+    # main_UCF101(v_root='your_path/UCF101/videos',
+    #             f_root='your_path/UCF101/frame')
 
     # main_HMDB51(v_root='your_path/HMDB51/videos',
     #             f_root='your_path/HMDB51/frame')
@@ -107,3 +132,6 @@ if __name__ == '__main__':
 
     # main_kinetics400(v_root='your_path/Kinetics400_256/videos',
     #                  f_root='your_path/Kinetics400_256/frame', dim=256)
+
+    main_kinetics600(v_root='/proj/vondrick/datasets/kinetics-600/data',
+                     f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames', dim=150)

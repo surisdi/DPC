@@ -1,6 +1,9 @@
 import os
 import csv
 import glob
+import pandas as pd
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
 def write_list(data_list, path, ):
     with open(path, 'w') as f:
@@ -66,7 +69,7 @@ def get_split(root, split_path, mode):
     return split_list
 
 def check_exists(row, root):
-    dirname = '_'.join([row['youtube_id'], '%06d' % row['time_start'], '%06d' % row['time_end']])
+    dirname = '_'.join(['25fps' + row['youtube_id'], '%06d' % row['time_start'], '%06d' % row['time_end']])
     full_dirname = os.path.join(root, row['label'], dirname)
     if os.path.exists(full_dirname):
         n_frames = len(glob.glob(os.path.join(full_dirname, '*.jpg')))
@@ -85,6 +88,24 @@ def main_Kinetics400(mode, k400_path, f_root, csv_root='../data/kinetics400'):
     elif mode == 'val':
         val_split = get_split(os.path.join(f_root, 'val_split'), val_split_path, 'val')
         write_list(val_split, os.path.join(csv_root, 'val_split.csv'))
+        write_list(val_split, os.path.join(csv_root, 'val_split.csv'))
+    elif mode == 'test':
+        test_split = get_split(f_root, test_split_path, 'test')
+        write_list(test_split, os.path.join(csv_root, 'test_split.csv'))
+    else:
+        raise IOError('wrong mode')
+
+def main_Kinetics600(mode, k600_path, f_root, csv_root='../data/kinetics600'):
+    train_split_path = os.path.join(k600_path, 'kinetics-600_train.csv')
+    val_split_path = os.path.join(k600_path, 'kinetics-600_val.csv')
+    test_split_path = os.path.join(k600_path, 'kinetics-600_test.csv')
+    if not os.path.exists(csv_root): os.makedirs(csv_root)
+    if mode == 'train':
+        train_split = get_split(os.path.join(f_root, 'train'), train_split_path, 'train')
+        write_list(train_split, os.path.join(csv_root, 'train_split.csv'))
+    elif mode == 'val':
+        val_split = get_split(os.path.join(f_root, 'val'), val_split_path, 'val')
+        write_list(val_split, os.path.join(csv_root, 'val_split.csv'))
     elif mode == 'test':
         test_split = get_split(f_root, test_split_path, 'test')
         write_list(test_split, os.path.join(csv_root, 'test_split.csv'))
@@ -95,8 +116,8 @@ if __name__ == '__main__':
     # f_root is the frame path
     # edit 'your_path' here: 
 
-    main_UCF101(f_root='your_path/UCF101/frame', 
-                splits_root='your_path/UCF101/splits_classification')
+    # main_UCF101(f_root='your_path/UCF101/frame',
+    #             splits_root='your_path/UCF101/splits_classification')
 
     # main_HMDB51(f_root='your_path/HMDB51/frame',
     #             splits_root='your_path/HMDB51/split/testTrainMulti_7030_splits')
@@ -109,3 +130,8 @@ if __name__ == '__main__':
     #                  k400_path='your_path/Kinetics',
     #                  f_root='your_path/Kinetics400_256/frame',
     #                  csv_root='../data/kinetics400_256')
+
+    main_Kinetics600(mode='test',  # train or val or test
+                     k600_path='/proj/vondrick/datasets/kinetics-600/data',
+                     f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames',
+                     csv_root='../data/kinetics600')

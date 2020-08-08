@@ -69,7 +69,6 @@ class DPC_RNN(nn.Module):
         # block: [B, N, C, SL, W, H]
         ### extract feature ###
         (B, N, C, SL, H, W) = block.shape
-        print(block.shape)
         block = block.view(B*N, C, SL, H, W)
         feature = self.backbone(block)
         del block
@@ -141,7 +140,7 @@ class DPC_RNN(nn.Module):
         b = time.time()
         if 'hyperbolic' in self.hyperbolic:
 
-            if self.hyperbolic == 'hyperbolic1':
+            if self.hyperbolic == 'hyperbolic1' or self.hyperbolic == 'hyperbolic3' or self.hyperbolic == 'hyperbolic4':
                 feature_shape = feature_inf.shape
                 feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
                 feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
@@ -167,6 +166,10 @@ class DPC_RNN(nn.Module):
             score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
                                feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
                                ).view(shape_expand[:2])
+            if self.hyperbolic == 'hyperbolic3':
+                score = score.pow(2)
+            elif self.hyperbolic == 'hyperbolic4':
+                score = torch.cosh(score).pow(2)
             score = - score.float()
 
         else:

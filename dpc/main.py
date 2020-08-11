@@ -46,7 +46,9 @@ parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate
 parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
 parser.add_argument('--train_what', default='all', type=str)
 parser.add_argument('--img_dim', default=128, type=int)
-parser.add_argument('--hyperbolic', type=str, default='euclidean', help='Hyperbolic mode')
+parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
+parser.add_argument('--hyperbolic_version', default=1, type=int)
+parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
 
 
 def main():
@@ -62,7 +64,10 @@ def main():
                         num_seq=args.num_seq, 
                         seq_len=args.seq_len, 
                         network=args.net, 
-                        pred_step=args.pred_step, hyperbolic=args.hyperbolic)
+                        pred_step=args.pred_step,
+                        hyperbolic=args.hyperbolic,
+                        hyperbolic_version=args.hyperbolic_version,
+                        distance = args.distance)
     else: raise ValueError('wrong model!')
 
     model = nn.DataParallel(model)

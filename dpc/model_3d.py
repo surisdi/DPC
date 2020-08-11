@@ -17,7 +17,8 @@ import geoopt
 
 class DPC_RNN(nn.Module):
     '''DPC with RNN'''
-    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network='resnet50', hyperbolic='euclidean'):
+    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network='resnet50', hyperbolic=False,
+                 hyperbolic_version=1, distance='regular'):
         super(DPC_RNN, self).__init__()
         torch.cuda.manual_seed(233)
         print('Using DPC-RNN model')
@@ -39,7 +40,9 @@ class DPC_RNN(nn.Module):
         So we can use the hyperbolic GRU.
         """
         self.hyperbolic = hyperbolic
-        if 'hyperbolic' in hyperbolic:
+        self.hyperbolic_version = hyperbolic_version
+        self.distance = distance
+        if hyperbolic:
             self.hyperbolic_linear = MobiusLinear(self.param['feature_size'], self.param['feature_size'],
                                                   # This computes an exmap0 after the operation, where the linear
                                                   # operation operates in the Euclidean space.
@@ -74,7 +77,7 @@ class DPC_RNN(nn.Module):
         del block
         feature = F.avg_pool3d(feature, (self.last_duration, 1, 1), stride=(1, 1, 1))
 
-        if self.hyperbolic == 'hyperbolic2':
+        if self.hyperbolic and self.hyperbolic_version == 2:
             feature_shape = feature.shape
             feature_hyp = feature.permute(0,2,3,4,1).contiguous() / 10
             feature_hyp_shape = feature_hyp.shape
@@ -138,9 +141,9 @@ class DPC_RNN(nn.Module):
         feature_inf = feature_inf.permute(0,1,3,4,2).contiguous().view(B*N*self.last_size**2, self.param['feature_size'])  #.transpose(0,1)
 
         b = time.time()
-        if 'hyperbolic' in self.hyperbolic:
+        if self.hyperbolic:
 
-            if self.hyperbolic == 'hyperbolic1' or self.hyperbolic == 'hyperbolic3' or self.hyperbolic == 'hyperbolic4':
+            if self.hyperbolic_version == 1:
                 feature_shape = feature_inf.shape
                 feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
                 feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
@@ -166,9 +169,9 @@ class DPC_RNN(nn.Module):
             score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
                                feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
                                ).view(shape_expand[:2])
-            if self.hyperbolic == 'hyperbolic3':
+            if self.distance == 'squared':
                 score = score.pow(2)
-            elif self.hyperbolic == 'hyperbolic4':
+            elif self.distance == 'cosh':
                 score = torch.cosh(score).pow(2)
             score = - score.float()
 

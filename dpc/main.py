@@ -215,40 +215,69 @@ def train(data_loader, model, optimizer, epoch):
         del input_seq
 
         b = time.time()
-        
-        if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
+        with torch.autograd.set_detect_anomaly(True):
+            if args.hyperbolic == 'hyp_cone':
 
-        # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
-        # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
-        score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
-        target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
-        target_flattened = target_flattened.float().argmax(dim=1)
+                criterion = nn.MSELoss().double()
+    #             target = torch.zeros_like(score_).double()
+    #             loss = criterion(score_, target)
+    #             print(loss)
+                score_flat = score_.flatten()
+                target = torch.zeros_like(score_flat)
+                loss = criterion(score_flat, target)
+                print(loss)
 
-        loss = criterion(score_flattened, target_flattened)
-        top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
+                [A, B] = score_.shape
+                score_ = score_[:B, :]
+                pos = score_.diagonal(dim1=-2, dim2=-1)
+                pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
+                k = score_.shape[0]
+                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
+                neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
+                accuracy_list[0].update(pos_acc, B)
+                accuracy_list[1].update(neg_acc, B)
+                losses.update(loss.item() / (2 * k**2), B)
 
-        accuracy_list[0].update(top1.item(),  B)
-        accuracy_list[1].update(top3.item(), B)
-        accuracy_list[2].update(top5.item(), B)
+            else:
+                if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
-        losses.update(loss.item(), B)
-        accuracy.update(top1.item(), B)
+                # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
+                # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
+                score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
+                target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
+                target_flattened = target_flattened.float().argmax(dim=1)
 
-        c = time.time()
+                loss = criterion(score_flattened, target_flattened)
+                top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
 
-        del score_
+                accuracy_list[0].update(top1.item(),  B)
+                accuracy_list[1].update(top3.item(), B)
+                accuracy_list[2].update(top5.item(), B)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+                losses.update(loss.item(), B)
+                accuracy.update(top1.item(), B)
+
+            c = time.time()
+
+            del score_
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
         del loss
 
         if idx % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
-                  'Acc: top1 {3:.4f}; top3 {4:.4f}; top5 {5:.4f} T:{6:.2f} TD:{7:.2f}\t'.format(
-                   epoch, idx, len(data_loader), top1, top3, top5, time.time()-a, time_data, loss=losses))
+            if args.hyperbolic == 'hyp_cone':
+                print('Epoch: [{0}][{1}/{2}]\t'
+                      'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
+                      'Acc: pos {3:.4f}; neg {4:.4f}; T:{5:.2f} TD:{6:.2f}\t'.format(
+                       epoch, idx, len(data_loader), pos_acc, neg_acc, time.time()-a, time_data, loss=losses))
+            else:
+                print('Epoch: [{0}][{1}/{2}]\t'
+                      'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
+                      'Acc: top1 {3:.4f}; top3 {4:.4f}; top5 {5:.4f} T:{6:.2f} TD:{7:.2f}\t'.format(
+                       epoch, idx, len(data_loader), top1, top3, top5, time.time()-a, time_data, loss=losses))
 
             writer_train.add_scalar('local/loss', losses.val, iteration)
             writer_train.add_scalar('local/accuracy', accuracy.val, iteration)
@@ -277,26 +306,46 @@ def validate(data_loader, model, epoch):
             [score_, mask_] = model(input_seq)
             del input_seq
 
-            if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
+            if args.hyperbolic == 'hyp_cone':
+                loss = score_.sum()
 
-            # [B, P, SQ, B, N, SQ]
-            score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
-            target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
-            target_flattened = target_flattened.float().argmax(dim=1)
+                [A, B] = score_.shape
+                score_ = score_[:B, :]
+                pos = score_.diagonal(dim1=-2, dim2=-1)
+                pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
+                k = score_.shape[0]
+                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
+                neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
+                accuracy_list[0].update(pos_acc, B)
+                accuracy_list[1].update(neg_acc, B)
+                losses.update(loss.item() / (2 * k**2), B)
+            
+            else:
+                if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
-            loss = criterion(score_flattened, target_flattened)
-            top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
+                # [B, P, SQ, B, N, SQ]
+                score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
+                target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
+                target_flattened = target_flattened.float().argmax(dim=1)
 
-            losses.update(loss.item(), B)
-            accuracy.update(top1.item(), B)
+                loss = criterion(score_flattened, target_flattened)
+                top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
 
-            accuracy_list[0].update(top1.item(),  B)
-            accuracy_list[1].update(top3.item(), B)
-            accuracy_list[2].update(top5.item(), B)
+                losses.update(loss.item(), B)
+                accuracy.update(top1.item(), B)
 
-    print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
-          'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(
-           epoch, args.epochs, *[i.avg for i in accuracy_list], loss=losses))
+                accuracy_list[0].update(top1.item(),  B)
+                accuracy_list[1].update(top3.item(), B)
+                accuracy_list[2].update(top5.item(), B)
+
+    if args.hyperbolic == 'hyp_cone':
+        print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
+              'Acc: pos {2:.4f}; neg {3:.4f} \t'.format(
+               epoch, args.epochs, pos_acc, neg_acc, loss=losses))
+    else:
+        print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
+              'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(
+               epoch, args.epochs, *[i.avg for i in accuracy_list], loss=losses))
     return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 

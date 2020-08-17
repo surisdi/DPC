@@ -342,7 +342,7 @@ def validate(data_loader, model, epoch):
                 accuracy_list[1].update(top3.item(), B)
                 accuracy_list[2].update(top5.item(), B)
 
-    if args.hyperbolic == 'hyp_cone':
+    if args.hyperbolic and args.hyp_cone:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: pos {2:.4f}; neg {3:.4f} \t'.format(
                epoch, args.epochs, pos_acc, neg_acc, loss=losses))

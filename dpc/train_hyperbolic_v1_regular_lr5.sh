@@ -7,6 +7,8 @@ python main.py \
 --epochs 300 \
 --start-epoch 0 \
 --reset_lr \
---hyperbolic hyperbolic3 \
+--hyperbolic \
+--hyperbolic_version 1 \
+--distance 'regular' \
 --lr 1e-5 \
---prefix hyperbolic3_nopretrain
+--prefix hyperbolic_v1_regular_lr5

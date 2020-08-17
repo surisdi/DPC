@@ -46,8 +46,11 @@ parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate
 parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
 parser.add_argument('--train_what', default='all', type=str)
 parser.add_argument('--img_dim', default=128, type=int)
-parser.add_argument('--hyperbolic', type=str, default='euclidean', help='Hyperbolic mode')
-
+parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
+parser.add_argument('--hyperbolic_version', default=1, type=int)
+parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
+parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic mode')
+parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
 
 def main():
     torch.manual_seed(0)
@@ -62,7 +65,12 @@ def main():
                         num_seq=args.num_seq, 
                         seq_len=args.seq_len, 
                         network=args.net, 
-                        pred_step=args.pred_step, hyperbolic=args.hyperbolic)
+                        pred_step=args.pred_step,
+                        hyperbolic=args.hyperbolic,
+                        hyperbolic_version=args.hyperbolic_version,
+                        distance = args.distance,
+                        hyp_cone = args.hyp_cone,
+                       )
     else: raise ValueError('wrong model!')
 
     model = nn.DataParallel(model)
@@ -216,16 +224,12 @@ def train(data_loader, model, optimizer, epoch):
 
         b = time.time()
         with torch.autograd.set_detect_anomaly(True):
-            if args.hyperbolic == 'hyp_cone':
-
-                criterion = nn.MSELoss().double()
-    #             target = torch.zeros_like(score_).double()
-    #             loss = criterion(score_, target)
-    #             print(loss)
-                score_flat = score_.flatten()
-                target = torch.zeros_like(score_flat)
-                loss = criterion(score_flat, target)
-                print(loss)
+            if args.hyperbolic and args.hyp_cone:
+#                 criterion = nn.MSELoss().double()
+#                 score_flat = score_.flatten()
+#                 target = torch.zeros_like(score_flat)
+#                 loss = criterion(score_flat, target)
+                loss = score_.sum()
 
                 [A, B] = score_.shape
                 score_ = score_[:B, :]
@@ -268,7 +272,7 @@ def train(data_loader, model, optimizer, epoch):
         del loss
 
         if idx % args.print_freq == 0:
-            if args.hyperbolic == 'hyp_cone':
+            if args.hyperbolic and args.hyp_cone:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
                       'Acc: pos {3:.4f}; neg {4:.4f}; T:{5:.2f} TD:{6:.2f}\t'.format(

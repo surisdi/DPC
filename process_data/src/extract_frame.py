@@ -116,6 +116,16 @@ def main_kinetics600(v_root, f_root, dim=150):
             # dim = 150 (crop to 128 later) or 256 (crop to 224 later)
             Parallel(n_jobs=32)(delayed(extract_video_opencv)(p, f_root_real, dim=dim) for p in tqdm(v_paths, total=len(v_paths)))
 
+def main_hollywood2(v_root, f_root, dim=150):
+    print('Extracting Hollywood2 ... ')
+    print('Extract to: \nframe: %s' % f_root)
+    if not os.path.exists(f_root): os.makedirs(f_root)
+    # if resume, remember to delete the last video folder
+    v_paths = glob.glob(os.path.join(v_root, '*.avi'))
+    v_paths = sorted(v_paths)
+    # dim = 150 (crop to 128 later) or 256 (crop to 224 later)
+    Parallel(n_jobs=32)(delayed(extract_video_opencv)(p, f_root, dim=dim) for p in tqdm(v_paths, total=len(v_paths)))
+
 
 if __name__ == '__main__':
     # v_root is the video source path, f_root is where to store frames
@@ -133,5 +143,8 @@ if __name__ == '__main__':
     # main_kinetics400(v_root='your_path/Kinetics400_256/videos',
     #                  f_root='your_path/Kinetics400_256/frame', dim=256)
 
-    main_kinetics600(v_root='/proj/vondrick/datasets/kinetics-600/data',
-                     f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames', dim=150)
+    # main_kinetics600(v_root='/proj/vondrick/datasets/kinetics-600/data',
+    #                  f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames', dim=150)
+
+    main_hollywood2(v_root='/proj/vondrick/datasets/Hollywood2/AVIClips',
+                     f_root='/proj/vondrick/datasets/Hollywood2/AVIClips_extracted_frames', dim=150)

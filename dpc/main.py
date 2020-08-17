@@ -132,7 +132,7 @@ def main():
             Normalize()
         ])
     # designed for kinetics400, short size=150, rand crop to 128x128
-    elif args.dataset == 'k400' or args.dataset == 'k600':
+    elif args.dataset == 'k400' or args.dataset == 'k600' or args.dataset == 'hollywood2':  # TODO think augmentation for hollywood2
         transform = transforms.Compose([
             RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
             RandomHorizontalFlip(consistent=True),
@@ -329,6 +329,12 @@ def get_data(transform, mode='train'):
                          seq_len=args.seq_len,
                          num_seq=args.num_seq,
                          downsample=args.ds)
+    elif args.dataset == 'hollywood2':
+        dataset = Hollywood2(mode=mode,
+                             transform=transform,
+                             seq_len=args.seq_len,
+                             num_seq=args.num_seq,
+                             downsample=args.ds)
     else:
         raise ValueError('dataset not supported')
 

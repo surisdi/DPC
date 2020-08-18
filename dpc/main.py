@@ -310,7 +310,7 @@ def validate(data_loader, model, epoch):
             [score_, mask_] = model(input_seq)
             del input_seq
 
-            if args.hyperbolic == 'hyp_cone':
+            if args.hyperbolic and args.hyp_cone:
                 loss = score_.sum()
 
                 [A, B] = score_.shape

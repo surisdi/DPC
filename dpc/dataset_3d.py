@@ -335,3 +335,93 @@ class UCF101_3d(data.Dataset):
         '''give action code, return action name'''
         return self.action_dict_decode[action_code]
 
+
+class Hollywood2(data.Dataset):
+    def __init__(self,
+                 mode='train',
+                 transform=None,
+                 seq_len=10,
+                 num_seq=5,
+                 downsample=3,
+                 epsilon=5,
+                 unit_test=False,
+                 big=False):
+        self.mode = mode
+        self.transform = transform
+        self.seq_len = seq_len
+        self.num_seq = num_seq
+        self.downsample = downsample
+        self.epsilon = epsilon
+        self.unit_test = unit_test
+
+        if big:
+            print('Using Hollywood2 full data (256x256)')
+        else:
+            print('Using Hollywood2 full data (150x150)')
+
+        # splits
+        if big:
+            if mode == 'train':
+                split = '../process_data/data/hollywood2/train_split.csv'
+                video_info = pd.read_csv(split, header=None)
+            elif (mode == 'val') or (mode == 'test'):
+                split = '../process_data/data/hollywood2/test_split.csv'
+                video_info = pd.read_csv(split, header=None)
+            else:
+                raise ValueError('wrong mode')
+        else:  # small
+            if mode == 'train':
+                split = '../process_data/data/hollywood2/train_split.csv'
+                video_info = pd.read_csv(split, header=None)
+            elif (mode == 'val') or (mode == 'test'):
+                split = '../process_data/data/hollywood2/test_split.csv'
+                video_info = pd.read_csv(split, header=None)
+            else:
+                raise ValueError('wrong mode')
+
+        path_drop_idx = f'../process_data/data/drop_idx_hollywood_{mode}.pth'
+        if os.path.isfile(path_drop_idx):
+            drop_idx = torch.load(path_drop_idx)
+        else:
+            drop_idx = []
+            print('filter out too short videos ...')
+            for idx, row in tqdm(video_info.iterrows(), total=len(video_info)):
+                vpath, vlen = row
+                if vlen - self.num_seq * self.seq_len * self.downsample <= 0:
+                    drop_idx.append(idx)
+            torch.save(drop_idx, path_drop_idx)
+
+        self.video_info = video_info.drop(drop_idx, axis=0)
+
+        if mode == 'val': self.video_info = self.video_info.sample(frac=0.3, random_state=666)
+        if self.unit_test: self.video_info = self.video_info.sample(32, random_state=666)
+        # shuffle not necessary because use RandomSampler
+
+    def idx_sampler(self, vlen, vpath):
+        '''sample index from a video'''
+        if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
+        n = 1
+        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample), n)
+        seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
+        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
+        return [seq_idx_block, vpath]
+
+    def __getitem__(self, index):
+        vpath, vlen = self.video_info.iloc[index]
+        # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+        items = self.idx_sampler(vlen, vpath)
+        if items is None: print(vpath)
+
+        idx_block, vpath = items
+        assert idx_block.shape == (self.num_seq, self.seq_len)
+        idx_block = idx_block.reshape(self.num_seq * self.seq_len)
+
+        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
+        t_seq = self.transform(seq)  # apply same transform
+        (C, H, W) = t_seq[0].size()
+        t_seq = torch.stack(t_seq, 0)
+        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
+        return t_seq
+
+    def __len__(self):
+        return len(self.video_info)

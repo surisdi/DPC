@@ -112,6 +112,23 @@ def main_Kinetics600(mode, k600_path, f_root, csv_root='../data/kinetics600'):
     else:
         raise IOError('wrong mode')
 
+
+def main_Hollywood2(path, csv_root='../data/hollywood2'):
+    if not os.path.exists(csv_root): os.makedirs(csv_root)
+    with open(os.path.join(csv_root, f'test_split.csv'), 'w') as f_test, \
+            open(os.path.join(csv_root, f'train_split.csv'), 'w') as f_train:
+        for root, dirs, files in os.walk(os.path.join(path, 'AVIClips_extracted_frames')):
+            for dir in dirs:
+                path_total = os.path.join(root, dir)
+                len_video = len(glob.glob(path_total + '/*'))
+                if 'train' in dir:
+                    f_train.writelines(f'{path_total},{len_video}\n')
+                elif 'test' in dir:
+                    f_test.writelines(f'{path_total},{len_video}\n')
+                else:
+                    print(f'This should not happen: {dir}')
+
+
 if __name__ == '__main__':
     # f_root is the frame path
     # edit 'your_path' here: 
@@ -131,7 +148,10 @@ if __name__ == '__main__':
     #                  f_root='your_path/Kinetics400_256/frame',
     #                  csv_root='../data/kinetics400_256')
 
-    main_Kinetics600(mode='test',  # train or val or test
-                     k600_path='/proj/vondrick/datasets/kinetics-600/data',
-                     f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames',
-                     csv_root='../data/kinetics600')
+    # main_Kinetics600(mode='test',  # train or val or test
+    #                  k600_path='/proj/vondrick/datasets/kinetics-600/data',
+    #                  f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames',
+    #                  csv_root='../data/kinetics600')
+
+    main_Hollywood2(path='/proj/vondrick/datasets/Hollywood2',
+                    csv_root='../data/hollywood2')

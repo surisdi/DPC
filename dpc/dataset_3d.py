@@ -258,17 +258,17 @@ class UCF101_3d(data.Dataset):
 
         # splits
         if mode == 'train':
-            split = '../process_data/data/ucf101/train_split%02d.csv' % self.which_split
+            split = '/proj/vondrick/lovish/data/ucf101/train_split%02d_split_hdd.csv' % self.which_split
             video_info = pd.read_csv(split, header=None)
         elif (mode == 'val') or (mode == 'test'): # use val for test
-            split = '../process_data/data/ucf101/test_split%02d.csv' % self.which_split 
+            split = '/proj/vondrick/lovish/data/ucf101/test_split%02d_split_hdd.csv' % self.which_split 
             video_info = pd.read_csv(split, header=None)
         else: raise ValueError('wrong mode')
 
         # get action list
         self.action_dict_encode = {}
         self.action_dict_decode = {}
-        action_file = os.path.join('../process_data/data/ucf101', 'classInd.txt')
+        action_file = os.path.join('/proj/vondrick/lovish/data/ucf101', 'classInd.txt')
         action_df = pd.read_csv(action_file, sep=' ', header=None)
         for _, row in action_df.iterrows():
             act_id, act_name = row

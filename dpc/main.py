@@ -12,9 +12,8 @@ plt.switch_backend('agg')
 sys.path.append('../utils')
 from dataset_3d import *
 from model_3d import *
-from resnet_2d3d import neq_load_customized
 from augmentation import *
-from utils import AverageMeter, save_checkpoint, denorm, calc_topk_accuracy
+from utils import AverageMeter, save_checkpoint, denorm, calc_topk_accuracy, neq_load_customized
 import geoopt
 
 import torch
@@ -117,7 +116,7 @@ def main():
         if os.path.isfile(args.pretrain):
             print("=> loading pretrained checkpoint '{}'".format(args.pretrain))
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(model, checkpoint['state_dict'])
+            model = neq_load_customized(model, checkpoint['state_dict'], parts = ['backbone', 'agg', 'network_pred'])
             print("=> loaded pretrained checkpoint '{}' (epoch {})"
                   .format(args.pretrain, checkpoint['epoch']))
         else: 
@@ -211,7 +210,6 @@ def train(data_loader, model, optimizer, epoch):
         time_data = a - time_last
         input_seq = input_seq.to(cuda)
         B = input_seq.size(0)
-        [score_, mask_] = model(input_seq)
         # visualize
         if (iteration == 0) or (iteration == args.print_freq):
             if B > 2: input_seq = input_seq[0:2,:]
@@ -220,15 +218,19 @@ def train(data_loader, model, optimizer, epoch):
                                        input_seq.transpose(2,3).contiguous().view(-1,3,args.img_dim,args.img_dim), 
                                        nrow=args.num_seq*args.seq_len)),
                                    iteration)
-        del input_seq
+#         del input_seq
 
         b = time.time()
         with torch.autograd.set_detect_anomaly(True):
             if args.hyperbolic and args.hyp_cone:
+                [score_, mask_, pred_norm, gt_norm] = model(input_seq)
 #                 criterion = nn.MSELoss().double()
 #                 score_flat = score_.flatten()
 #                 target = torch.zeros_like(score_flat)
 #                 loss = criterion(score_flat, target)
+
+                pred_norm = torch.mean(pred_norm)
+                gt_norm = torch.mean(gt_norm)
                 loss = score_.sum()
 
                 [A, B] = score_.shape
@@ -243,6 +245,7 @@ def train(data_loader, model, optimizer, epoch):
                 losses.update(loss.item() / (2 * k**2), B)
 
             else:
+                [score_, mask_] = model(input_seq)
                 if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
                 # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
@@ -275,8 +278,8 @@ def train(data_loader, model, optimizer, epoch):
             if args.hyperbolic and args.hyp_cone:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
-                      'Acc: pos {3:.4f}; neg {4:.4f}; T:{5:.2f} TD:{6:.2f}\t'.format(
-                       epoch, idx, len(data_loader), pos_acc, neg_acc, time.time()-a, time_data, loss=losses))
+                      'Acc: pos {3:.4f}; neg {4:.4f}; pnorm {5:.4f}; gnorm {6:.4f}; T:{7:.2f} TD:{8:.2f}\t'.format(
+                       epoch, idx, len(data_loader), pos_acc, neg_acc, pred_norm, gt_norm, time.time()-a, time_data, loss=losses))
             else:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
@@ -307,10 +310,12 @@ def validate(data_loader, model, epoch):
         for idx, input_seq in tqdm(enumerate(data_loader), total=len(data_loader)):
             input_seq = input_seq.to(cuda)
             B = input_seq.size(0)
-            [score_, mask_] = model(input_seq)
-            del input_seq
+#             del input_seq
 
             if args.hyperbolic and args.hyp_cone:
+                [score_, mask_, pred_norm, gt_norm] = model(input_seq)
+                pred_norm = torch.mean(pred_norm)
+                gt_norm = torch.mean(gt_norm)
                 loss = score_.sum()
 
                 [A, B] = score_.shape
@@ -325,6 +330,7 @@ def validate(data_loader, model, epoch):
                 losses.update(loss.item() / (2 * k**2), B)
             
             else:
+                [score_, mask_] = model(input_seq)
                 if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
                 # [B, P, SQ, B, N, SQ]
@@ -344,8 +350,8 @@ def validate(data_loader, model, epoch):
 
     if args.hyperbolic and args.hyp_cone:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
-              'Acc: pos {2:.4f}; neg {3:.4f} \t'.format(
-               epoch, args.epochs, pos_acc, neg_acc, loss=losses))
+              'Acc: pos {2:.4f}; neg {3:.4f}; pnorm {4:.4f}; gnorm {5:.4f};\t'.format(
+               epoch, args.epochs, pos_acc, neg_acc, pred_norm, gt_norm, loss=losses))
     else:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(

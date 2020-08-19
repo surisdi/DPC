@@ -203,7 +203,7 @@ class Bottleneck2d(nn.Module):
 
 
 class ResNet2d3d_full(nn.Module):
-    def __init__(self, block, layers, track_running_stats=True):
+    def __init__(self, block, layers, track_running_stats=True, last_dim=256):
         super(ResNet2d3d_full, self).__init__()
         self.inplanes = 64
         self.track_running_stats = track_running_stats
@@ -219,7 +219,7 @@ class ResNet2d3d_full(nn.Module):
         self.layer1 = self._make_layer(block[0], 64, layers[0])
         self.layer2 = self._make_layer(block[1], 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block[2], 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block[3], 256, layers[3], stride=2, is_final=True)
+        self.layer4_last = self._make_layer(block[3], last_dim, layers[3], stride=2, is_final=True)
         # modify layer4 from exp=512 to exp=256
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
@@ -265,7 +265,7 @@ class ResNet2d3d_full(nn.Module):
         x = self.layer1(x) 
         x = self.layer2(x) 
         x = self.layer3(x) 
-        x = self.layer4(x)
+        x = self.layer4_last(x)
 
         return x
 
@@ -305,31 +305,6 @@ def resnet200_2d3d_full(**kwargs):
     '''Constructs a ResNet-101 model. '''
     model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d], 
                    [3, 24, 36, 3], **kwargs)
-    return model
-
-def neq_load_customized(model, pretrained_dict):
-    ''' load pre-trained model in a not-equal way,
-    when new model has been partially modified '''
-    model_dict = model.state_dict()
-    tmp = {}
-    print('\n=======Check Weights Loading======')
-    print('Weights not used from pretrained file:')
-    for k, v in pretrained_dict.items():
-        if k in model_dict:
-            tmp[k] = v
-        else:
-            print(k)
-    print('---------------------------')
-    print('Weights not loaded into new model:')
-    for k, v in model_dict.items():
-        if k not in pretrained_dict:
-            print(k)
-    print('===================================\n')
-    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-    del pretrained_dict
-    model_dict.update(tmp)
-    del tmp
-    model.load_state_dict(model_dict)
     return model
 
 

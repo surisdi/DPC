@@ -99,6 +99,7 @@ class DPC_RNN(nn.Module):
             feature = gmath.logmap0(feature_hyp, k=torch.tensor(-1.), dim=1).float()
 
         else:
+#             print(feature.shape)
             feature_inf_all = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size) # before ReLU, (-inf, +inf)
 
         feature_inf = feature_inf_all[:, N-self.pred_step::, :].contiguous()
@@ -196,9 +197,11 @@ class DPC_RNN(nn.Module):
 
                 shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
                 dist_fn = HypConeDist(K = 0.1)
-                score = dist_fn(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
-                                   feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1]))
-
+                pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+                gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+                score = dist_fn(pred_flatten, gt_flatten)
+                pred_norm = torch.mean(torch.mean(pred_flatten, dim=-1))
+                gt_norm = torch.mean(torch.mean(gt_flatten, dim=-1))
                 # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
                 score = score.reshape(B*self.pred_step*self.last_size**2, B*self.pred_step*self.last_size**2)
                 score[score < 0] = 0
@@ -233,6 +236,8 @@ class DPC_RNN(nn.Module):
         # print(b-a, c-b, d-c)
 
 
+        if self.hyperbolic and self.hyp_cone:
+            return[score, self.mask, pred_norm, gt_norm]
         return [score, self.mask]
 
     def _initialize_weights(self, module):

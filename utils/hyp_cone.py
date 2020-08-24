@@ -4,6 +4,18 @@ class HypConeDist():
     def __init__(self, K=0.1):
         self.K = K
     def __call__(self, x, y):
+        '''
+        scale up embedding if it's smaller than the threshold radius K
+        
+        Note: this step potentially contains a lot of in-place operation,
+        which is not legal for torch.autograd. Need to make clone of
+        the variable every step of the way
+        '''
+        x_norm = torch.norm(x.clone(), p=2, dim=-1)
+        x_small = x[x_norm < (self.K + 1e-7)].clone().transpose(dim0=-1, dim1=-2)
+        scale_factor = ((self.K + 1e-7) / x_norm[x_norm < (self.K + 1e-7)].clone())
+        x_small_clone = (x_small * scale_factor).transpose(dim0=-1, dim1=-2)
+        x[x_norm < (self.K + 1e-7)] = x_small_clone.clone()
         return self.Xi(x, y) - self.Phi(x, K = self.K)
     def Xi(self, x, y):
         x_norm = torch.norm(x, p=2, dim=-1)

@@ -46,10 +46,9 @@ parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate
 parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
 parser.add_argument('--train_what', default='all', type=str)
 parser.add_argument('--img_dim', default=128, type=int)
-parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
+parser.add_argument('--loss', default='dot', type=str, help='which loss function to use')
 parser.add_argument('--hyperbolic_version', default=1, type=int)
 parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
-parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic mode')
 parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
 
 def main():
@@ -66,10 +65,9 @@ def main():
                         seq_len=args.seq_len, 
                         network=args.net, 
                         pred_step=args.pred_step,
-                        hyperbolic=args.hyperbolic,
+                        loss = args.loss,
                         hyperbolic_version=args.hyperbolic_version,
                         distance = args.distance,
-                        hyp_cone = args.hyp_cone,
                        )
     else: raise ValueError('wrong model!')
 
@@ -163,7 +161,7 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
         
         # save curve
-        if args.hyperbolic and args.hyp_cone:
+        if args.loss == 'hyp_cone':
             
             train_loss, train_pos_acc, train_neg_acc, train_p_norm, train_g_norm = train(train_loader, model, optimizer, epoch)
             val_loss, val_pos_acc, val_neg_acc, val_p_norm, val_g_norm = validate(val_loader, model, epoch)
@@ -195,7 +193,7 @@ def main():
             writer_val.add_scalar('accuracy/top5', val_accuracy_list[2], epoch)
         
         # save check_point
-        if args.hyperbolic and args.hyp_cone:
+        if args.loss == 'hyp_cone':
             is_best = val_pos_acc > best_acc; best_acc = max(val_pos_acc, best_acc)
         else:
             is_best = val_acc > best_acc; best_acc = max(val_acc, best_acc)
@@ -248,7 +246,7 @@ def train(data_loader, model, optimizer, epoch):
 
         b = time.time()
         with torch.autograd.set_detect_anomaly(True):
-            if args.hyperbolic and args.hyp_cone:
+            if args.loss == 'hyp_cone':
                 [score_, mask_, pred_norm, gt_norm] = model(input_seq)
 #                 criterion = nn.MSELoss().double()
 #                 score_flat = score_.flatten()
@@ -324,7 +322,7 @@ def train(data_loader, model, optimizer, epoch):
         del loss
 
         if idx % args.print_freq == 0:
-            if args.hyperbolic and args.hyp_cone:
+            if args.loss == 'hyp_cone':
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
                       'Acc: pos {3:.4f}; neg {4:.4f}; pnorm {5:.4f}; gnorm {6:.4f}; T:{7:.2f} TD:{8:.2f}\t'.format(
@@ -347,7 +345,7 @@ def train(data_loader, model, optimizer, epoch):
         time_last = time.time()
 
     # return different trainign statistics for different objective
-    if args.hyperbolic and args.hyp_cone:
+    if args.loss == 'hyp_cone':
         return losses.local_avg, train_pos_acc.local_avg, train_neg_acc.local_avg, train_p_norm.local_avg, train_g_norm.local_avg
     else:
         return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
@@ -369,7 +367,7 @@ def validate(data_loader, model, epoch):
             B = input_seq.size(0)
 #             del input_seq
 
-            if args.hyperbolic and args.hyp_cone:
+            if args.loss == 'hyp_cone':
                 [score_, mask_, pred_norm, gt_norm] = model(input_seq)
                 pred_norm = torch.mean(pred_norm)
                 gt_norm = torch.mean(gt_norm)
@@ -409,7 +407,7 @@ def validate(data_loader, model, epoch):
                 accuracy_list[1].update(top3.item(), B)
                 accuracy_list[2].update(top5.item(), B)
 
-    if args.hyperbolic and args.hyp_cone:
+    if args.loss == 'hyp_cone':
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: pos {2:.4f}; neg {3:.4f}; pnorm {4:.4f}; gnorm {5:.4f};\t'.format(
                epoch, args.epochs, pos_acc, neg_acc, pred_norm, gt_norm, loss=losses))
@@ -417,7 +415,7 @@ def validate(data_loader, model, epoch):
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(
                epoch, args.epochs, *[i.avg for i in accuracy_list], loss=losses))
-    if args.hyperbolic and args.hyp_cone:
+    if args.loss == 'hyp_cone':
         return losses.local_avg, val_pos_acc.local_avg, val_neg_acc.local_avg, val_p_norm.local_avg, val_g_norm.local_avg
     else:
         return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]

@@ -21,6 +21,7 @@ import torch.optim as optim
 from torch.utils import data
 from torchvision import datasets, models, transforms
 import torchvision.utils as vutils
+import math
 
 torch.backends.cudnn.benchmark = True
 
@@ -49,7 +50,7 @@ parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
 parser.add_argument('--hyperbolic_version', default=1, type=int)
 parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
 parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic mode')
-parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
+parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
 
 def main():
     torch.manual_seed(0)
@@ -160,23 +161,44 @@ def main():
     
     ### main loop ###
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch)
-        val_loss, val_acc, val_accuracy_list = validate(val_loader, model, epoch)
-
+        
         # save curve
-        writer_train.add_scalar('global/loss', train_loss, epoch)
-        writer_train.add_scalar('global/accuracy', train_acc, epoch)
-        writer_val.add_scalar('global/loss', val_loss, epoch)
-        writer_val.add_scalar('global/accuracy', val_acc, epoch)
-        writer_train.add_scalar('accuracy/top1', train_accuracy_list[0], epoch)
-        writer_train.add_scalar('accuracy/top3', train_accuracy_list[1], epoch)
-        writer_train.add_scalar('accuracy/top5', train_accuracy_list[2], epoch)
-        writer_val.add_scalar('accuracy/top1', val_accuracy_list[0], epoch)
-        writer_val.add_scalar('accuracy/top3', val_accuracy_list[1], epoch)
-        writer_val.add_scalar('accuracy/top5', val_accuracy_list[2], epoch)
-
+        if args.hyperbolic and args.hyp_cone:
+            
+            train_loss, train_pos_acc, train_neg_acc, train_p_norm, train_g_norm = train(train_loader, model, optimizer, epoch)
+            val_loss, val_pos_acc, val_neg_acc, val_p_norm, val_g_norm = validate(val_loader, model, epoch)
+            
+            writer_train.add_scalar('global/loss', train_loss, epoch)
+            writer_val.add_scalar('global/loss', val_loss, epoch)
+            writer_train.add_scalar('accuracy/pos', train_pos_acc, epoch) # positive accuracy
+            writer_train.add_scalar('accuracy/neg', train_neg_acc, epoch) # negative accuracy
+            writer_train.add_scalar('accuracy/pnorm', train_p_norm, epoch) # average norm of predicted embedding
+            writer_train.add_scalar('accuracy/gnorm', train_g_norm, epoch) # average norm of ground truth embedding
+            writer_val.add_scalar('accuracy/pos', val_pos_acc, epoch)
+            writer_val.add_scalar('accuracy/neg', val_neg_acc, epoch)
+            writer_val.add_scalar('accuracy/pnorm', val_p_norm, epoch)
+            writer_val.add_scalar('accuracy/gnorm', val_g_norm, epoch)
+        else:
+            
+            train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch)
+            val_loss, val_acc, val_accuracy_list = validate(val_loader, model, epoch)
+            
+            writer_train.add_scalar('global/loss', train_loss, epoch)
+            writer_train.add_scalar('global/accuracy', train_acc, epoch)
+            writer_val.add_scalar('global/loss', val_loss, epoch)
+            writer_val.add_scalar('global/accuracy', val_acc, epoch)
+            writer_train.add_scalar('accuracy/top1', train_accuracy_list[0], epoch)
+            writer_train.add_scalar('accuracy/top3', train_accuracy_list[1], epoch)
+            writer_train.add_scalar('accuracy/top5', train_accuracy_list[2], epoch)
+            writer_val.add_scalar('accuracy/top1', val_accuracy_list[0], epoch)
+            writer_val.add_scalar('accuracy/top3', val_accuracy_list[1], epoch)
+            writer_val.add_scalar('accuracy/top5', val_accuracy_list[2], epoch)
+        
         # save check_point
-        is_best = val_acc > best_acc; best_acc = max(val_acc, best_acc)
+        if args.hyperbolic and args.hyp_cone:
+            is_best = val_pos_acc > best_acc; best_acc = max(val_pos_acc, best_acc)
+        else:
+            is_best = val_acc > best_acc; best_acc = max(val_acc, best_acc)
         save_checkpoint({'epoch': epoch+1,
                          'net': args.net,
                          'state_dict': model.state_dict(),
@@ -200,6 +222,10 @@ def train(data_loader, model, optimizer, epoch):
     losses = AverageMeter()
     accuracy = AverageMeter()
     accuracy_list = [AverageMeter(), AverageMeter(), AverageMeter()]
+    train_pos_acc = AverageMeter()
+    train_neg_acc = AverageMeter()
+    train_p_norm = AverageMeter()
+    train_g_norm = AverageMeter()
     model.train()
     global iteration
 
@@ -227,7 +253,7 @@ def train(data_loader, model, optimizer, epoch):
 #                 criterion = nn.MSELoss().double()
 #                 score_flat = score_.flatten()
 #                 target = torch.zeros_like(score_flat)
-#                 loss = criterion(score_flat, target)
+#                 loss = criterion(score_flat, target.clone())
 
                 pred_norm = torch.mean(pred_norm)
                 gt_norm = torch.mean(gt_norm)
@@ -240,8 +266,10 @@ def train(data_loader, model, optimizer, epoch):
                 k = score_.shape[0]
                 score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
                 neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
-                accuracy_list[0].update(pos_acc, B)
-                accuracy_list[1].update(neg_acc, B)
+                train_pos_acc.update(pos_acc, B)
+                train_neg_acc.update(neg_acc, B)
+                train_p_norm.update(pred_norm.item())
+                train_g_norm.update(gt_norm.item())
                 losses.update(loss.item() / (2 * k**2), B)
 
             else:
@@ -266,10 +294,31 @@ def train(data_loader, model, optimizer, epoch):
 
             c = time.time()
 
-            del score_
+#             del score_
 
             optimizer.zero_grad()
+#             try:
             loss.backward()
+#             except: # debugging entailment cone loss
+#                 nan_score = 0
+#                 for i in score_.flatten():
+#                     if math.isnan(i):
+#                         nan_score += 1
+#                 print('number of nan value in score:', nan_score)
+
+#                 pnorm = torch.norm(pred, p=2, dim=-1)
+#                 gnorm = torch.norm(gt, p=2, dim=-1)
+#                 pcount = 0
+#                 for p in pnorm:
+#                     if p < 0.1:
+#                         pcount += 1
+#                 gcount = 0
+#                 for g in gnorm:
+#                     if g < 0.1:
+#                         gcount += 1
+#                 print('pcount:', pcount)
+#                 print('gcount:', gcount)
+#                 sys.exit()
             optimizer.step()
 
         del loss
@@ -297,13 +346,21 @@ def train(data_loader, model, optimizer, epoch):
 
         time_last = time.time()
 
-    return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
+    # return different trainign statistics for different objective
+    if args.hyperbolic and args.hyp_cone:
+        return losses.local_avg, train_pos_acc.local_avg, train_neg_acc.local_avg, train_p_norm.local_avg, train_g_norm.local_avg
+    else:
+        return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 
 def validate(data_loader, model, epoch):
     losses = AverageMeter()
     accuracy = AverageMeter()
     accuracy_list = [AverageMeter(), AverageMeter(), AverageMeter()]
+    val_pos_acc = AverageMeter()
+    val_neg_acc = AverageMeter()
+    val_p_norm = AverageMeter()
+    val_g_norm = AverageMeter()
     model.eval()
 
     with torch.no_grad():
@@ -327,8 +384,12 @@ def validate(data_loader, model, epoch):
                 neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
                 accuracy_list[0].update(pos_acc, B)
                 accuracy_list[1].update(neg_acc, B)
+                # bookkeeping
                 losses.update(loss.item() / (2 * k**2), B)
-            
+                val_pos_acc.update(pos_acc, B)
+                val_neg_acc.update(neg_acc, B)
+                val_p_norm.update(pred_norm.item())
+                val_g_norm.update(gt_norm.item())
             else:
                 [score_, mask_] = model(input_seq)
                 if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
@@ -356,7 +417,10 @@ def validate(data_loader, model, epoch):
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(
                epoch, args.epochs, *[i.avg for i in accuracy_list], loss=losses))
-    return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
+    if args.hyperbolic and args.hyp_cone:
+        return losses.local_avg, val_pos_acc.local_avg, val_neg_acc.local_avg, val_p_norm.local_avg, val_g_norm.local_avg
+    else:
+        return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 
 def get_data(transform, mode='train'):

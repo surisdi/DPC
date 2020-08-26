@@ -200,8 +200,8 @@ class DPC_RNN(nn.Module):
                 pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
                 gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
                 score = dist_fn(pred_flatten, gt_flatten)
-                pred_norm = torch.mean(torch.mean(pred_flatten, dim=-1))
-                gt_norm = torch.mean(torch.mean(gt_flatten, dim=-1))
+                pred_norm = torch.mean(torch.norm(pred_flatten, p=2, dim=-1))
+                gt_norm = torch.mean(torch.norm(gt_flatten, p=2, dim=-1))
                 # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
                 score = score.reshape(B*self.pred_step*self.last_size**2, B*self.pred_step*self.last_size**2)
                 score[score < 0] = 0

@@ -79,7 +79,6 @@ class DPC_RNN(nn.Module):
 
         block = block.view(B*N, C, SL, H, W)
         feature = self.backbone(block)
-        del block
         feature = F.avg_pool3d(feature, (self.last_duration, 1, 1), stride=(1, 1, 1))
 
         if 'hyp' in self.loss and self.hyperbolic_version == 2:
@@ -109,7 +108,7 @@ class DPC_RNN(nn.Module):
         del feature_inf_all
 
         # ### aggregate, predict future ###
-        # if self.loss == 'poincare':
+        # if self.loss == 'hyp_poincare':
         #     feature_shape = feature.shape
         #     feature = feature.view(-1, feature_shape[-1])
         #     _, hidden = self.huperbolic_agg(feature[:, 0:N - self.pred_step, :].contiguous())
@@ -122,7 +121,7 @@ class DPC_RNN(nn.Module):
         for i in range(self.pred_step):
             # sequentially pred future
 
-            # if self.loss == 'poincare':
+            # if self.loss == 'hyp_poincare':
             #     p_tmp = self.hyperbolic_network_pred(hidden)
             #     pred.append(p_tmp)
             #     p_tmp_shape = p_tmp.shape
@@ -147,75 +146,21 @@ class DPC_RNN(nn.Module):
         feature_inf = feature_inf.permute(0,1,3,4,2).contiguous().view(B*N*self.last_size**2, self.param['feature_size'])  #.transpose(0,1)
 
         b = time.time()
-        if self.loss == 'poincare':
-            if self.hyperbolic_version == 1:
-                feature_shape = feature_inf.shape
-                feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
-                feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
-                # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
-                feature_inf_hyp = feature_inf_hyp.view(feature_shape)
-
-            else:  # hyperbolic2
-                feature_inf_hyp = feature_inf  # was already in hyperbolic space
-
-            pred_shape = pred.shape
-            pred_hyp = pred.view(-1, pred_shape[-1]).double()/10
-            pred_hyp = self.hyperbolic_linear(pred_hyp)
-            # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
-            pred_hyp = pred_hyp.view(pred_shape)
-
-            # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
-            # Maybe more accurate (it is more specific for poincare)
-            # But this is much faster... TODO implement batch dist_matrix on geoopt library
-            # score = dist_matrix(pred_hyp, feature_inf_hyp)
-            #
-            manif = geoopt.manifolds.PoincareBall(c=1)
-            shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
-            score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
-                               feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-                               ).view(shape_expand[:2])
-            if self.distance == 'squared':
-                score = score.pow(2)
-            elif self.distance == 'cosh':
-                score = torch.cosh(score).pow(2)
-            score = - score.float()
-            score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
+        if self.loss == 'hyp_poincare':
+            score = self.poincare_loss(feature_inf, pred, B)
         elif self.loss == 'hyp_cone': # hyperbolic cone (entailment cone loss)
-            feature_shape = feature_inf.shape
-            feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
-            feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
-            # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
-            feature_inf_hyp = feature_inf_hyp.view(feature_shape)
-
-            pred_shape = pred.shape
-            pred_hyp = pred.view(-1, pred_shape[-1]).double()/10
-            pred_hyp = self.hyperbolic_linear(pred_hyp)
-            # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
-            pred_hyp = pred_hyp.view(pred_shape)
-
-            shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
-            dist_fn = HypConeDist(K = 0.1)
-            pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-            gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-            score = dist_fn(pred_flatten, gt_flatten)
-            pred_norm = torch.mean(torch.norm(pred_flatten, p=2, dim=-1))
-            gt_norm = torch.mean(torch.norm(gt_flatten, p=2, dim=-1))
-            # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
-            score = score.reshape(B*self.pred_step*self.last_size**2, B*self.pred_step*self.last_size**2)
-            score[score < 0] = 0
-            pos = score.diagonal(dim1=-2, dim2=-1)
-            score = self.margin - score
-            score[score < 0] = 0
-            k = score.size(0)
-            score.as_strided([k], [k + 1]).copy_(pos * k-1); # positive score is multiplied by number of negative samples
+            score, pred_norm, gt_norm, = self.hyp_loss(feature_inf, pred, B, weight = 1)
+        elif self.loss == 'hyp_poincone':
+            poincare_score = self.poincare_loss(feature_inf, pred, B)
+            cone_score = self.hyp_loss(feature_inf, pred, B, weight = 0.1)
+            score = poincare_score + cone_score
         elif self.loss == 'dot': # euclidean dot product
             score = torch.matmul(pred, feature_inf.transpose(0,1))
             score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
 
-
         c = time.time()
 
-        del feature_inf, pred
+        del feature_inf, pred, block
 
         if self.mask is None: # only compute mask once
             # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
@@ -247,4 +192,72 @@ class DPC_RNN(nn.Module):
 
     def reset_mask(self):
         self.mask = None
+        
+    def poincare_loss(self, feature_inf, pred, B):
+        if self.hyperbolic_version == 1:
+                feature_shape = feature_inf.shape
+                feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
+                feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
+                # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
+                feature_inf_hyp = feature_inf_hyp.view(feature_shape)
+
+        else:  # hyperbolic2
+            feature_inf_hyp = feature_inf  # was already in hyperbolic space
+
+        pred_shape = pred.shape
+        pred_hyp = pred.view(-1, pred_shape[-1]).double()/10
+        pred_hyp = self.hyperbolic_linear(pred_hyp)
+        # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
+        pred_hyp = pred_hyp.view(pred_shape)
+
+        # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
+        # Maybe more accurate (it is more specific for poincare)
+        # But this is much faster... TODO implement batch dist_matrix on geoopt library
+        # score = dist_matrix(pred_hyp, feature_inf_hyp)
+        #
+        manif = geoopt.manifolds.PoincareBall(c=1)
+        shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
+        score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
+                           feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+                           ).view(shape_expand[:2])
+        if self.distance == 'squared':
+            score = score.pow(2)
+        elif self.distance == 'cosh':
+            score = torch.cosh(score).pow(2)
+        score = - score.float()
+        score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
+        return score
+
+    def hyp_loss(self, feature_inf, pred, B, weight = 1):
+        '''
+        weight: weight to be multiplied to positive scores to balance
+        '''
+        feature_shape = feature_inf.shape
+        feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
+        feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
+        # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
+        feature_inf_hyp = feature_inf_hyp.view(feature_shape)
+
+        pred_shape = pred.shape
+        pred_hyp = pred.view(-1, pred_shape[-1]).double()/10
+        pred_hyp = self.hyperbolic_linear(pred_hyp)
+        # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
+        pred_hyp = pred_hyp.view(pred_shape)
+
+        shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
+        dist_fn = HypConeDist(K = 0.1)
+        pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+        gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+        score = dist_fn(pred_flatten, gt_flatten)
+        pred_norm = torch.mean(torch.norm(pred_flatten, p=2, dim=-1))
+        gt_norm = torch.mean(torch.norm(gt_flatten, p=2, dim=-1))
+        # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
+        score = score.reshape(B*self.pred_step*self.last_size**2, B*self.pred_step*self.last_size**2)
+        score[score < 0] = 0
+        pos = score.diagonal(dim1=-2, dim2=-1)
+        score = self.margin - score
+        score[score < 0] = 0
+        k = score.size(0)
+        score.as_strided([k], [k + 1]).copy_(pos * (k - 1) * weight); # positive score is multiplied by number of negative samples
+        return score, pred_norm, gt_norm
 

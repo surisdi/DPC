@@ -5,6 +5,9 @@ def select_resnet(network, track_running_stats=True,):
     if network == 'resnet18':
         model = resnet18_2d3d_full(track_running_stats=track_running_stats)
         param['feature_size'] = 256
+    elif network == 'resnet18-dim8':
+        model = resnet18_2d3d_full(track_running_stats=track_running_stats, last_dim=8)
+        param['feature_size'] = 8
     elif network == 'resnet34':
         model = resnet34_2d3d_full(track_running_stats=track_running_stats)
         param['feature_size'] = 256 

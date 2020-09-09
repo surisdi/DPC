@@ -137,6 +137,43 @@ class AccuracyTable(object):
                 % (label, key, self.dict[key]['correct'], self.dict[key]['count'], acc))
 
 
+def neq_load_customized(model, pretrained_dict, parts = ['backbone', 'agg', 'network_pred']):
+    ''' load pre-trained model in a not-equal way,
+    when new model has been partially modified '''
+    model_dict = model.state_dict()
+    tmp = {}
+    print('\n=======Check Weights Loading======')
+    print('loading the following parts:', ', '.join(parts))
+    for part in parts:
+        print('loading:', part)
+        print('\n=======Check Weights Loading======')
+        print('Weights not used from pretrained file:')
+        for k, v in pretrained_dict.items():
+            if part in k:
+                if k in model_dict:
+                    tmp[k] = v
+                else:
+                    print(k)
+        print('---------------------------')
+        print('Weights not loaded into new model:')
+        for k, v in model_dict.items():
+            if part in k:
+                if k not in pretrained_dict:
+                    print(k)
+        print('===================================\n')
+    
+    
+    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    
+    
+    
+    del pretrained_dict
+    model_dict.update(tmp)
+    del tmp
+    model.load_state_dict(model_dict)
+    return model
+            
+            
 class ConfusionMeter(object):
     '''compute and show confusion matrix'''
     def __init__(self, num_class):

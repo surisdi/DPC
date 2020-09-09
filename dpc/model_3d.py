@@ -19,8 +19,8 @@ import geoopt
 
 class DPC_RNN(nn.Module):
     '''DPC with RNN'''
-    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network='resnet50', hyperbolic=False,
-                 hyperbolic_version=1, distance='regular', hyp_cone=False, margin=0.1, early_action=False,
+    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network='resnet50', loss='dot',
+                 hyperbolic_version=1, distance='regular', margin=0.1, early_action=False,
                  early_action_self=False, nclasses=0):
         super(DPC_RNN, self).__init__()
         torch.cuda.manual_seed(233)
@@ -153,7 +153,7 @@ class DPC_RNN(nn.Module):
             for i in range(self.pred_step):
                 # sequentially pred future
 
-                # if self.hyperbolic:
+                # if self.loss == 'hyp_poincare':
                 #     p_tmp = self.hyperbolic_network_pred(hidden)
                 #     pred.append(p_tmp)
                 #     p_tmp_shape = p_tmp.shape
@@ -177,6 +177,7 @@ class DPC_RNN(nn.Module):
         # GT: [B, N, D, last_size, last_size]
         N = self.pred_step
         # dot product D dimension in pred-GT pair, get a 6d tensor. First 3 dims are from pred, last 3 dims are from GT. 
+        pred = pred.permute(0,1,3,4,2).contiguous().view(B*self.pred_step*self.last_size**2, self.param['feature_size'])
         feature_inf = feature_inf.permute(0,1,3,4,2).contiguous().view(B*N*self.last_size**2, self.param['feature_size'])  #.transpose(0,1)
 
         b = time.time()

@@ -12,9 +12,8 @@ plt.switch_backend('agg')
 sys.path.append('../utils')
 from dataset_3d import *
 from model_3d import *
-from resnet_2d3d import neq_load_customized
 from augmentation import *
-from utils import AverageMeter, save_checkpoint, denorm, calc_topk_accuracy
+from utils import AverageMeter, save_checkpoint, denorm, calc_topk_accuracy, neq_load_customized
 import geoopt
 
 import torch
@@ -22,6 +21,7 @@ import torch.optim as optim
 from torch.utils import data
 from torchvision import datasets, models, transforms
 import torchvision.utils as vutils
+import math
 
 torch.backends.cudnn.benchmark = True
 
@@ -51,7 +51,7 @@ parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
 parser.add_argument('--hyperbolic_version', default=1, type=int)
 parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
 parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
-parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
+parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
 parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
 parser.add_argument('--early_action_self', action='store_true',
                     help='Only applies when early_action. Train without labels')
@@ -132,7 +132,7 @@ def main():
         if os.path.isfile(args.pretrain):
             print("=> loading pretrained checkpoint '{}'".format(args.pretrain))
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(model, checkpoint['state_dict'])
+            model = neq_load_customized(model, checkpoint['state_dict'], parts = ['backbone', 'agg', 'network_pred'])
             print("=> loaded pretrained checkpoint '{}' (epoch {})"
                   .format(args.pretrain, checkpoint['epoch']))
         else: 
@@ -176,23 +176,44 @@ def main():
     
     ### main loop ###
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch, args)
-        val_loss, val_acc, val_accuracy_list = validate(val_loader, model, epoch)
-
+        
         # save curve
-        writer_train.add_scalar('global/loss', train_loss, epoch)
-        writer_train.add_scalar('global/accuracy', train_acc, epoch)
-        writer_val.add_scalar('global/loss', val_loss, epoch)
-        writer_val.add_scalar('global/accuracy', val_acc, epoch)
-        writer_train.add_scalar('accuracy/top1', train_accuracy_list[0], epoch)
-        writer_train.add_scalar('accuracy/top3', train_accuracy_list[1], epoch)
-        writer_train.add_scalar('accuracy/top5', train_accuracy_list[2], epoch)
-        writer_val.add_scalar('accuracy/top1', val_accuracy_list[0], epoch)
-        writer_val.add_scalar('accuracy/top3', val_accuracy_list[1], epoch)
-        writer_val.add_scalar('accuracy/top5', val_accuracy_list[2], epoch)
-
+        if args.hyperbolic and args.hyp_cone:
+            
+            train_loss, train_pos_acc, train_neg_acc, train_p_norm, train_g_norm = train(train_loader, model, optimizer, epoch, args)
+            val_loss, val_pos_acc, val_neg_acc, val_p_norm, val_g_norm = validate(val_loader, model, epoch)
+            
+            writer_train.add_scalar('global/loss', train_loss, epoch)
+            writer_val.add_scalar('global/loss', val_loss, epoch)
+            writer_train.add_scalar('accuracy/pos', train_pos_acc, epoch) # positive accuracy
+            writer_train.add_scalar('accuracy/neg', train_neg_acc, epoch) # negative accuracy
+            writer_train.add_scalar('accuracy/pnorm', train_p_norm, epoch) # average norm of predicted embedding
+            writer_train.add_scalar('accuracy/gnorm', train_g_norm, epoch) # average norm of ground truth embedding
+            writer_val.add_scalar('accuracy/pos', val_pos_acc, epoch)
+            writer_val.add_scalar('accuracy/neg', val_neg_acc, epoch)
+            writer_val.add_scalar('accuracy/pnorm', val_p_norm, epoch)
+            writer_val.add_scalar('accuracy/gnorm', val_g_norm, epoch)
+        else:
+            
+            train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch)
+            val_loss, val_acc, val_accuracy_list = validate(val_loader, model, epoch)
+            
+            writer_train.add_scalar('global/loss', train_loss, epoch)
+            writer_train.add_scalar('global/accuracy', train_acc, epoch)
+            writer_val.add_scalar('global/loss', val_loss, epoch)
+            writer_val.add_scalar('global/accuracy', val_acc, epoch)
+            writer_train.add_scalar('accuracy/top1', train_accuracy_list[0], epoch)
+            writer_train.add_scalar('accuracy/top3', train_accuracy_list[1], epoch)
+            writer_train.add_scalar('accuracy/top5', train_accuracy_list[2], epoch)
+            writer_val.add_scalar('accuracy/top1', val_accuracy_list[0], epoch)
+            writer_val.add_scalar('accuracy/top3', val_accuracy_list[1], epoch)
+            writer_val.add_scalar('accuracy/top5', val_accuracy_list[2], epoch)
+        
         # save check_point
-        is_best = val_acc > best_acc; best_acc = max(val_acc, best_acc)
+        if args.hyperbolic and args.hyp_cone:
+            is_best = val_pos_acc > best_acc; best_acc = max(val_pos_acc, best_acc)
+        else:
+            is_best = val_acc > best_acc; best_acc = max(val_acc, best_acc)
         save_checkpoint({'epoch': epoch+1,
                          'net': args.net,
                          'state_dict': model.state_dict(),
@@ -216,6 +237,10 @@ def train(data_loader, model, optimizer, epoch, args):
     losses = AverageMeter()
     accuracy = AverageMeter()
     accuracy_list = [AverageMeter(), AverageMeter(), AverageMeter()]
+    train_pos_acc = AverageMeter()
+    train_neg_acc = AverageMeter()
+    train_p_norm = AverageMeter()
+    train_g_norm = AverageMeter()
     model.train()
     global iteration
 
@@ -226,7 +251,7 @@ def train(data_loader, model, optimizer, epoch, args):
         time_data = a - time_last
         input_seq = input_seq.to(cuda)
         B = input_seq.size(0)
-        [score_, mask_] = model(input_seq)
+        score_, mask_, pred_norm, gt_norm = model(input_seq)
         # visualize
         if (iteration == 0) or (iteration == args.print_freq):
             if B > 2: input_seq = input_seq[0:2,:]
@@ -235,7 +260,7 @@ def train(data_loader, model, optimizer, epoch, args):
                                        input_seq.transpose(2,3).contiguous().view(-1,3,args.img_dim,args.img_dim), 
                                        nrow=args.num_seq*args.seq_len)),
                                    iteration)
-        del input_seq
+        # del input_seq
 
         b = time.time()
 
@@ -245,10 +270,13 @@ def train(data_loader, model, optimizer, epoch, args):
             losses.update(loss.item(), score_.shape[0]/args.num_seq)
 
         else:
-            if args.hyp_cone:
-                # TODO control options. Ruoshi version
+            if args.hyperbolic and args.hyp_cone:
+                # TODO Ruoshi version:
+                # pred_norm = torch.mean(pred_norm)
+                # gt_norm = torch.mean(gt_norm)
                 # loss = score_.sum()
 
+                # Didac version
                 score_[score_ < 0] = 0
                 pos = score_.diag().clone()
                 neg = torch.relu(args.margin - score_)
@@ -262,12 +290,13 @@ def train(data_loader, model, optimizer, epoch, args):
                 pos = score_.diagonal(dim1=-2, dim2=-1)
                 pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
                 k = score_.shape[0]
-                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k))
+                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
                 neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
-                accuracy_list[0].update(pos_acc, B)
-                accuracy_list[1].update(neg_acc, B)
-                # losses.update(loss.item() / (2 * k**2), B)
-                losses.update(loss.item(), B)
+                train_pos_acc.update(pos_acc, B)
+                train_neg_acc.update(neg_acc, B)
+                train_p_norm.update(pred_norm.item())
+                train_g_norm.update(gt_norm.item())
+                losses.update(loss.item() / (2 * k**2), B)
 
             else:
                 if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
@@ -299,10 +328,11 @@ def train(data_loader, model, optimizer, epoch, args):
         del loss
 
         if idx % args.print_freq == 0:
-            if args.hyp_cone:
-                print(f'fEpoch: [{epoch}][{idx}/{len(data_loader)}]\t'
-                      f'Loss {losses.val:.6f} ({losses.local_avg:.4f})\t'
-                      f'Loss neg: {loss_neg}, Loss pos: {loss_pos}, T:{time.time()-a:.2f} TD:{time_data:.2f}\t')
+            if args.hyperbolic and args.hyp_cone:
+                print('Epoch: [{0}][{1}/{2}]\t'
+                      'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
+                      'Acc: pos {3:.4f}; neg {4:.4f}; pnorm {5:.4f}; gnorm {6:.4f}; T:{7:.2f} TD:{8:.2f}\t'.format(
+                       epoch, idx, len(data_loader), pos_acc, neg_acc, pred_norm, gt_norm, time.time()-a, time_data, loss=losses))
             else:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
@@ -320,20 +350,29 @@ def train(data_loader, model, optimizer, epoch, args):
 
         time_last = time.time()
 
-    return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
+    # TODO remove if-elses. Make it more abstract
+    # return different trainign statistics for different objective
+    if args.loss == 'hyp_cone':
+        return losses.local_avg, train_pos_acc.local_avg, train_neg_acc.local_avg, train_p_norm.local_avg, train_g_norm.local_avg
+    else:
+        return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 
 def validate(data_loader, model, epoch):
     losses = AverageMeter()
     accuracy = AverageMeter()
     accuracy_list = [AverageMeter(), AverageMeter(), AverageMeter()]
+    val_pos_acc = AverageMeter()
+    val_neg_acc = AverageMeter()
+    val_p_norm = AverageMeter()
+    val_g_norm = AverageMeter()
     model.eval()
 
     with torch.no_grad():
         for idx, (input_seq, labels) in tqdm(enumerate(data_loader), total=len(data_loader)):
             input_seq = input_seq.to(cuda)
             B = input_seq.size(0)
-            [score_, mask_] = model(input_seq)
+            score_, mask_, pred_norm, gt_norm = model(input_seq)
             del input_seq
 
             if args.early_action and not args.early_action_self:
@@ -344,9 +383,13 @@ def validate(data_loader, model, epoch):
                 losses.update(loss.item(), score_.shape[0] / args.num_seq)
 
             else:
-
                 if args.hyp_cone:
+                    # TODO ruoshi version
+                    # pred_norm = torch.mean(pred_norm)
+                    # gt_norm = torch.mean(gt_norm)
                     # loss = score_.sum()
+
+                    # Didac version
                     score_[score_ < 0] = 0
                     pos = score_.diag().clone()
                     neg = torch.relu(args.margin - score_)
@@ -362,35 +405,43 @@ def validate(data_loader, model, epoch):
                     neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
                     accuracy_list[0].update(pos_acc, B)
                     accuracy_list[1].update(neg_acc, B)
-                    losses.update(loss.item() / (2 * k**2), B)
+                    # bookkeeping
+                    losses.update(loss.item() / (2 * k ** 2), B)
+                    val_pos_acc.update(pos_acc, B)
+                    val_neg_acc.update(neg_acc, B)
+                    val_p_norm.update(pred_norm.item())
+                    val_g_norm.update(gt_norm.item())
 
                 else:
                     if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
                     # [B, P, SQ, B, N, SQ]
-                    score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
-                    target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
+                    score_flattened = score_.view(B * NP * SQ, B2 * NS * SQ)
+                    target_flattened = target_.view(B * NP * SQ, B2 * NS * SQ)
                     target_flattened = target_flattened.float().argmax(dim=1)
 
                     loss = criterion(score_flattened, target_flattened)
-                    top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
+                    top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
 
                     losses.update(loss.item(), B)
                     accuracy.update(top1.item(), B)
 
-                    accuracy_list[0].update(top1.item(),  B)
+                    accuracy_list[0].update(top1.item(), B)
                     accuracy_list[1].update(top3.item(), B)
                     accuracy_list[2].update(top5.item(), B)
 
     if args.hyp_cone:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
-              'Acc: pos {2:.4f}; neg {3:.4f} \t'.format(
-               epoch, args.epochs, pos_acc, neg_acc, loss=losses))
+              'Acc: pos {2:.4f}; neg {3:.4f}; pnorm {4:.4f}; gnorm {5:.4f};\t'.format(
+               epoch, args.epochs, pos_acc, neg_acc, pred_norm, gt_norm, loss=losses))
     else:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: top1 {2:.4f}; top3 {3:.4f}; top5 {4:.4f} \t'.format(
                epoch, args.epochs, *[i.avg for i in accuracy_list], loss=losses))
-    return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
+    if args.hyp_cone:
+        return losses.local_avg, val_pos_acc.local_avg, val_neg_acc.local_avg, val_p_norm.local_avg, val_g_norm.local_avg
+    else:
+        return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 
 def get_data(transform, mode='train', return_label=False):

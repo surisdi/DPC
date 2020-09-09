@@ -182,28 +182,53 @@ class DPC_RNN(nn.Module):
 
         b = time.time()
         if self.hyperbolic:
-            if not self.hyp_cone:  # poincare embedding (contrastive loss)
-                if self.hyperbolic_version == 1:
-                    feature_shape = feature_inf.shape
-                    feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()/10
-                    feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
-                    # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
-                    feature_inf_hyp = feature_inf_hyp.view(feature_shape)
+            # TODO clean and make less "if-else", and more general.
+            if self.hyperbolic_version == 1:
+                feature_shape = feature_inf.shape
+                feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()
+                feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
+                # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
+                feature_inf_hyp = feature_inf_hyp.view(feature_shape)
 
-                else:  # hyperbolic2
-                    feature_inf_hyp = feature_inf  # was already in hyperbolic space
+            else:  # hyperbolic2
+                feature_inf_hyp = feature_inf  # was already in hyperbolic space
 
-                pred_shape = pred.shape
-                pred_hyp = pred.view(-1, pred_shape[-1]).double()/10
-                pred_hyp = self.hyperbolic_linear(pred_hyp)
-                # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
-                pred_hyp = pred_hyp.view(pred_shape)
+            pred_shape = pred.shape
+            pred_hyp = pred.view(-1, pred_shape[-1]).double()
+            pred_hyp = self.hyperbolic_linear(pred_hyp)
+            # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
+            pred_hyp = pred_hyp.view(pred_shape)
 
+            pred_norm, gt_norm = None, None
+            if self.hyp_cone:
+                shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
+                dist_fn = HypConeDist(K=0.1)
+                pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+                gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
+                score = dist_fn(pred_flatten, gt_flatten)
+
+                # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
+                score = score.reshape(B * self.pred_step * self.last_size ** 2,
+                                      B * self.pred_step * self.last_size ** 2)
+
+                # TODO put as option. Ruoshi version
+                # pred_norm = torch.mean(torch.norm(pred_flatten, p=2, dim=-1))
+                # gt_norm = torch.mean(torch.norm(gt_flatten, p=2, dim=-1))
+                # score[score < 0] = 0
+                # pos = score.diagonal(dim1=-2, dim2=-1)
+                # score = self.margin - score
+                # score[score < 0] = 0
+                # k = score.size(0)
+                # # positive score is multiplied by number of negative samples
+                # weight = 1
+                # score.as_strided([k], [k + 1]).copy_(pos * (k - 1) * weight);
+
+            else:
                 # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
                 # Maybe more accurate (it is more specific for poincare)
                 # But this is much faster... TODO implement batch dist_matrix on geoopt library
                 # score = dist_matrix(pred_hyp, feature_inf_hyp)
-                #
+
                 manif = geoopt.manifolds.PoincareBall(c=1)
                 shape_expand = (pred_hyp.shape[0], feature_inf_hyp.shape[0], pred_hyp.shape[1])
                 score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
@@ -217,34 +242,6 @@ class DPC_RNN(nn.Module):
                 pred_temp_size = self.num_seq -1 if self.early_action_self else self.pred_step
                 score = score.view(B, pred_temp_size, self.last_size**2, B, N, self.last_size**2)
 
-            else: # hyperbolic cone (entailment cone loss)
-                feature_shape = feature_inf.shape
-                feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()
-                feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
-                # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
-                feature_inf_hyp = feature_inf_hyp.view(feature_shape)
-
-                pred_shape = pred.shape
-                pred_hyp = pred.view(-1, pred_shape[-1]).double()
-                pred_hyp = self.hyperbolic_linear(pred_hyp)
-                # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
-                pred_hyp = pred_hyp.view(pred_shape)*0.99
-
-                shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
-                dist_fn = HypConeDist(K = 0.1)
-                score = dist_fn(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
-                                   feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1]))
-
-                # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
-                score = score.reshape(B*self.pred_step*self.last_size**2, B*self.pred_step*self.last_size**2)
-
-                # TODO put as option. Ruoshi version
-                # pos = score.diagonal(dim1=-2, dim2=-1)
-                # score = self.margin - score
-                # score[score < 0] = 0
-                # k = score.size(0)
-                # score.as_strided([k], [k + 1]).copy_(pos * k-1); # positive score is multiplied by number of negative samples
-
         else: # euclidean dot product
             score = torch.matmul(pred, feature_inf.transpose(0,1))
             score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
@@ -254,33 +251,13 @@ class DPC_RNN(nn.Module):
         del feature_inf, pred
 
         if self.mask is None:  # only compute mask once
-            # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
-            if self.early_action_self:
-                # Here NO temporal neg! All steps try to predict the last one
-                mask = torch.zeros((B, self.num_seq-1, self.last_size**2, B, N, self.last_size**2), dtype=torch.int8, requires_grad=False).detach().cuda()
-                mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
-                tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B*self.last_size**2, self.num_seq-1, B*self.last_size**2, N)
-                for j in range(B*self.last_size**2):
-                    tmp[j, torch.arange(self.num_seq-1), j, torch.arange(N-self.pred_step, N)] = 1 # pos
-                mask = tmp.view(B, self.last_size**2, self.num_seq-1, B, self.last_size**2, N).permute(0,2,1,3,5,4)
-                self.mask = mask
-            else:
-                mask = torch.zeros((B, self.pred_step, self.last_size**2, B, N, self.last_size**2), dtype=torch.int8, requires_grad=False).detach().cuda()
-                mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
-                for k in range(B):
-                    mask[k, :, torch.arange(self.last_size**2), k, :, torch.arange(self.last_size**2)] = -1 # temporal neg
-                tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B*self.last_size**2, self.pred_step, B*self.last_size**2, N)
-                for j in range(B*self.last_size**2):
-                    tmp[j, torch.arange(self.pred_step), j, torch.arange(N-self.pred_step, N)] = 1 # pos
-                mask = tmp.view(B, self.last_size**2, self.pred_step, B, self.last_size**2, N).permute(0,2,1,3,5,4)
-                self.mask = mask
+            self.compute_mask(B, N)
 
         d = time.time()
 
         # print(b-a, c-b, d-c)
 
-
-        return [score, self.mask]
+        return score, self.mask, pred_norm, gt_norm
 
     def _initialize_weights(self, module):
         for name, param in module.named_parameters():
@@ -292,4 +269,32 @@ class DPC_RNN(nn.Module):
 
     def reset_mask(self):
         self.mask = None
+
+    def compute_mask(self, B, N):
+        # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
+        if self.early_action_self:
+            # Here NO temporal neg! All steps try to predict the last one
+            mask = torch.zeros((B, self.num_seq - 1, self.last_size ** 2, B, N, self.last_size ** 2), dtype=torch.int8,
+                               requires_grad=False).detach().cuda()
+            mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
+            tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B * self.last_size ** 2, self.num_seq - 1,
+                                                                   B * self.last_size ** 2, N)
+            for j in range(B * self.last_size ** 2):
+                tmp[j, torch.arange(self.num_seq - 1), j, torch.arange(N - self.pred_step, N)] = 1  # pos
+            mask = tmp.view(B, self.last_size ** 2, self.num_seq - 1, B, self.last_size ** 2, N).permute(0, 2, 1, 3, 5,
+                                                                                                         4)
+            self.mask = mask
+        else:
+            mask = torch.zeros((B, self.pred_step, self.last_size ** 2, B, N, self.last_size ** 2), dtype=torch.int8,
+                               requires_grad=False).detach().cuda()
+            mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
+            for k in range(B):
+                mask[k, :, torch.arange(self.last_size ** 2), k, :,
+                torch.arange(self.last_size ** 2)] = -1  # temporal neg
+            tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B * self.last_size ** 2, self.pred_step,
+                                                                   B * self.last_size ** 2, N)
+            for j in range(B * self.last_size ** 2):
+                tmp[j, torch.arange(self.pred_step), j, torch.arange(N - self.pred_step, N)] = 1  # pos
+            mask = tmp.view(B, self.last_size ** 2, self.pred_step, B, self.last_size ** 2, N).permute(0, 2, 1, 3, 5, 4)
+            self.mask = mask
 

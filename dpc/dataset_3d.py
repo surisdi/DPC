@@ -345,7 +345,8 @@ class Hollywood2(data.Dataset):
                  downsample=3,
                  epsilon=5,
                  unit_test=False,
-                 big=False):
+                 big=False,
+                 return_label=False):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
@@ -353,6 +354,7 @@ class Hollywood2(data.Dataset):
         self.downsample = downsample
         self.epsilon = epsilon
         self.unit_test = unit_test
+        self.return_label = return_label
 
         if big:
             print('Using Hollywood2 full data (256x256)')
@@ -397,6 +399,19 @@ class Hollywood2(data.Dataset):
         if self.unit_test: self.video_info = self.video_info.sample(32, random_state=666)
         # shuffle not necessary because use RandomSampler
 
+        # Get labels
+        self.labels = {}
+        self.dict_labels = {}
+        with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
+            for line in f:
+                key, label, *_ = line.split()
+                if '-' in label:  # scene, not action
+                    continue
+                key = key.split('/')[-1].split('.')[0]
+                self.labels[key] = label
+                if label not in self.dict_labels:
+                    self.dict_labels[label] = len(self.dict_labels)
+
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
@@ -408,6 +423,7 @@ class Hollywood2(data.Dataset):
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
+        label = self.dict_labels[self.labels[vpath.split('/')[-1]]]
         # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
@@ -421,7 +437,10 @@ class Hollywood2(data.Dataset):
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-        return t_seq
+        if self.return_label:
+            return t_seq, label
+        return t_seq, torch.tensor(-1)
+
 
     def __len__(self):
         return len(self.video_info)

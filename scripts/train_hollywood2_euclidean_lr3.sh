@@ -1,0 +1,11 @@
+python main.py \
+--gpu 0,1,2,3 \
+--net resnet18 \
+--dataset hollywood2 \
+--batch_size 64 \
+--img_dim 80 \
+--epochs 300 \
+--start-epoch 0 \
+--reset_lr \
+--lr 1e-3 \
+--prefix hyperbolic_hollywood_euclidean_lr3

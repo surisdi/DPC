@@ -366,8 +366,3 @@ class MobiusGRU(torch.nn.Module):
                  weight_hh_1=self.weight_hh_1 is not None, weight_hh_2=self.weight_hh_2 is not None,
                  bias_1=self.bias_1 is not None, bias_2=self.bias_2 is not None,
                 )
-
-    
-    
-    
-    

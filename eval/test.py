@@ -194,7 +194,7 @@ def main():
 
     ### main loop ###
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc = train(train_loader, model, optimizer, epoch)
+        train_loss, train_acc = train(train_loader, model, optimizer, epoch, args)
         val_loss, val_acc = validate(val_loader, model)
         scheduler.step(epoch)
 

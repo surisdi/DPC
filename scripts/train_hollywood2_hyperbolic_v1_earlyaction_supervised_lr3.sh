@@ -1,0 +1,14 @@
+python ../dpc/main.py \
+--gpu 4,5,6,7 \
+--net resnet18 \
+--dataset hollywood2 \
+--batch_size 32 \
+--img_dim 80 \
+--epochs 600 \
+--hyperbolic \
+--hyperbolic_version 1 \
+--early_action \
+--pred_step 0 \
+--lr 1e-3 \
+--prefix hyperbolic_hollywood2_v1_earlyaction_supervised_lr3 \
+--nclasses 12

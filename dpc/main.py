@@ -46,16 +46,28 @@ parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate
 parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
 parser.add_argument('--train_what', default='all', type=str)
 parser.add_argument('--img_dim', default=128, type=int)
+parser.add_argument('--nclasses', default=0, type=int)
 parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
 parser.add_argument('--hyperbolic_version', default=1, type=int)
 parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
-parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic mode')
+parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
 parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
+parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
+parser.add_argument('--early_action_self', action='store_true',
+                    help='Only applies when early_action. Train without labels')
 
 def main():
     torch.manual_seed(0)
     np.random.seed(0)
     global args; args = parser.parse_args()
+
+    if args.early_action_self:
+        assert args.early_action, 'Read the explanation'
+        assert args.pred_step == 1, 'We only want to predict the last one'
+    elif args.early_action:
+        assert args.pred_step == 0, 'We want to predict a label, not a feature'
+
+    assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
     os.environ["CUDA_VISIBLE_DEVICES"]=str(args.gpu)
     global cuda; cuda = torch.device('cuda')
 
@@ -70,6 +82,9 @@ def main():
                         hyperbolic_version=args.hyperbolic_version,
                         distance = args.distance,
                         hyp_cone = args.hyp_cone,
+                        early_action = args.early_action,
+                        early_action_self = args.early_action_self,
+                        nclasses = args.nclasses
                        )
     else: raise ValueError('wrong model!')
 
@@ -99,7 +114,7 @@ def main():
     ### restart training ###
     if args.resume:
         if os.path.isfile(args.resume):
-            args.old_lr = float(re.search('_lr(.+?)_', args.resume).group(1))
+            args.old_lr = float(re.search('_lr(.+?)_', args.resume.split('/')[-3]).group(1))
             print("=> loading resumed checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume, map_location=torch.device('cpu'))
             args.start_epoch = checkpoint['epoch']
@@ -145,8 +160,8 @@ def main():
             Normalize()
         ])
 
-    train_loader = get_data(transform, 'train')
-    val_loader = get_data(transform, 'val')
+    train_loader = get_data(transform, 'train', return_label=args.nclasses>0)
+    val_loader = get_data(transform, 'val', return_label=args.nclasses>0)
 
     # setup tools
     global de_normalize; de_normalize = denorm()
@@ -161,7 +176,7 @@ def main():
     
     ### main loop ###
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch)
+        train_loss, train_acc, train_accuracy_list = train(train_loader, model, optimizer, epoch, args)
         val_loss, val_acc, val_accuracy_list = validate(val_loader, model, epoch)
 
         # save curve
@@ -197,7 +212,7 @@ def process_output(mask):
     target.requires_grad = False
     return target, (B, B2, NS, NP, SQ)
 
-def train(data_loader, model, optimizer, epoch):
+def train(data_loader, model, optimizer, epoch, args):
     losses = AverageMeter()
     accuracy = AverageMeter()
     accuracy_list = [AverageMeter(), AverageMeter(), AverageMeter()]
@@ -205,7 +220,7 @@ def train(data_loader, model, optimizer, epoch):
     global iteration
 
     time_last = time.time()
-    for idx, input_seq in enumerate(data_loader):
+    for idx, (input_seq, labels) in enumerate(data_loader):
 
         a = time.time()
         time_data = a - time_last
@@ -223,24 +238,36 @@ def train(data_loader, model, optimizer, epoch):
         del input_seq
 
         b = time.time()
-        with torch.autograd.set_detect_anomaly(True):
-            if args.hyperbolic and args.hyp_cone:
-#                 criterion = nn.MSELoss().double()
-#                 score_flat = score_.flatten()
-#                 target = torch.zeros_like(score_flat)
-#                 loss = criterion(score_flat, target)
-                loss = score_.sum()
+
+        if args.early_action and not args.early_action_self:
+            loss = torch.nn.functional.cross_entropy(score_, labels.repeat_interleave(args.num_seq).cuda())
+            top1 = top3 = top5 = 0
+            losses.update(loss.item(), score_.shape[0]/args.num_seq)
+
+        else:
+            if args.hyp_cone:
+                # TODO control options. Ruoshi version
+                # loss = score_.sum()
+
+                score_[score_ < 0] = 0
+                pos = score_.diag().clone()
+                neg = torch.relu(args.margin - score_)
+                neg.fill_diagonal_(0)
+                loss_pos = pos.sum()
+                loss_neg = neg.sum()/score_.shape[0]
+                loss = loss_pos + loss_neg
 
                 [A, B] = score_.shape
                 score_ = score_[:B, :]
                 pos = score_.diagonal(dim1=-2, dim2=-1)
                 pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
                 k = score_.shape[0]
-                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
+                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k))
                 neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
                 accuracy_list[0].update(pos_acc, B)
                 accuracy_list[1].update(neg_acc, B)
-                losses.update(loss.item() / (2 * k**2), B)
+                # losses.update(loss.item() / (2 * k**2), B)
+                losses.update(loss.item(), B)
 
             else:
                 if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
@@ -265,18 +292,17 @@ def train(data_loader, model, optimizer, epoch):
 
             del score_
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         del loss
 
         if idx % args.print_freq == 0:
-            if args.hyperbolic and args.hyp_cone:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
-                      'Acc: pos {3:.4f}; neg {4:.4f}; T:{5:.2f} TD:{6:.2f}\t'.format(
-                       epoch, idx, len(data_loader), pos_acc, neg_acc, time.time()-a, time_data, loss=losses))
+            if args.hyp_cone:
+                print(f'fEpoch: [{epoch}][{idx}/{len(data_loader)}]\t'
+                      f'Loss {losses.val:.6f} ({losses.local_avg:.4f})\t'
+                      f'Loss neg: {loss_neg}, Loss pos: {loss_pos}, T:{time.time()-a:.2f} TD:{time_data:.2f}\t')
             else:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Loss {loss.val:.6f} ({loss.local_avg:.4f})\t'
@@ -304,45 +330,59 @@ def validate(data_loader, model, epoch):
     model.eval()
 
     with torch.no_grad():
-        for idx, input_seq in tqdm(enumerate(data_loader), total=len(data_loader)):
+        for idx, (input_seq, labels) in tqdm(enumerate(data_loader), total=len(data_loader)):
             input_seq = input_seq.to(cuda)
             B = input_seq.size(0)
             [score_, mask_] = model(input_seq)
             del input_seq
 
-            if args.hyperbolic == 'hyp_cone':
-                loss = score_.sum()
+            if args.early_action and not args.early_action_self:
+                loss = torch.nn.functional.cross_entropy(score_, labels.repeat_interleave(args.num_seq).cuda())
+                top1 = top3 = top5 = 0
+                print(loss)
+                print(score_.shape[0])
+                losses.update(loss.item(), score_.shape[0] / args.num_seq)
 
-                [A, B] = score_.shape
-                score_ = score_[:B, :]
-                pos = score_.diagonal(dim1=-2, dim2=-1)
-                pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
-                k = score_.shape[0]
-                score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
-                neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
-                accuracy_list[0].update(pos_acc, B)
-                accuracy_list[1].update(neg_acc, B)
-                losses.update(loss.item() / (2 * k**2), B)
-            
             else:
-                if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
-                # [B, P, SQ, B, N, SQ]
-                score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
-                target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
-                target_flattened = target_flattened.float().argmax(dim=1)
+                if args.hyp_cone:
+                    # loss = score_.sum()
+                    score_[score_ < 0] = 0
+                    pos = score_.diag().clone()
+                    neg = torch.relu(args.margin - score_)
+                    neg.fill_diagonal_(0)
+                    loss = pos.sum() + neg.sum()
 
-                loss = criterion(score_flattened, target_flattened)
-                top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
+                    [A, B] = score_.shape
+                    score_ = score_[:B, :]
+                    pos = score_.diagonal(dim1=-2, dim2=-1)
+                    pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
+                    k = score_.shape[0]
+                    score_.as_strided([k], [k + 1]).copy_(torch.zeros(k));
+                    neg_acc = float((score_ == 0).sum().item() - k) / float(k ** 2 - k)
+                    accuracy_list[0].update(pos_acc, B)
+                    accuracy_list[1].update(neg_acc, B)
+                    losses.update(loss.item() / (2 * k**2), B)
 
-                losses.update(loss.item(), B)
-                accuracy.update(top1.item(), B)
+                else:
+                    if idx == 0: target_, (_, B2, NS, NP, SQ) = process_output(mask_)
 
-                accuracy_list[0].update(top1.item(),  B)
-                accuracy_list[1].update(top3.item(), B)
-                accuracy_list[2].update(top5.item(), B)
+                    # [B, P, SQ, B, N, SQ]
+                    score_flattened = score_.view(B*NP*SQ, B2*NS*SQ)
+                    target_flattened = target_.view(B*NP*SQ, B2*NS*SQ)
+                    target_flattened = target_flattened.float().argmax(dim=1)
 
-    if args.hyperbolic and args.hyp_cone:
+                    loss = criterion(score_flattened, target_flattened)
+                    top1, top3, top5 = calc_topk_accuracy(score_flattened, target_flattened, (1,3,5))
+
+                    losses.update(loss.item(), B)
+                    accuracy.update(top1.item(), B)
+
+                    accuracy_list[0].update(top1.item(),  B)
+                    accuracy_list[1].update(top3.item(), B)
+                    accuracy_list[2].update(top5.item(), B)
+
+    if args.hyp_cone:
         print('[{0}/{1}] Loss {loss.local_avg:.4f}\t'
               'Acc: pos {2:.4f}; neg {3:.4f} \t'.format(
                epoch, args.epochs, pos_acc, neg_acc, loss=losses))
@@ -353,7 +393,7 @@ def validate(data_loader, model, epoch):
     return losses.local_avg, accuracy.local_avg, [i.local_avg for i in accuracy_list]
 
 
-def get_data(transform, mode='train'):
+def get_data(transform, mode='train', return_label=False):
     print('Loading data for "%s" ...' % mode)
     if args.dataset == 'k400':
         use_big_K400 = args.img_dim > 140
@@ -362,7 +402,8 @@ def get_data(transform, mode='train'):
                               seq_len=args.seq_len,
                               num_seq=args.num_seq,
                               downsample=5,
-                              big=use_big_K400)
+                              big=use_big_K400,
+                              return_label=return_label)
     elif args.dataset == 'k600':
         use_big_K600 = args.img_dim > 140
         dataset = Kinetics600_full_3d(mode=mode,
@@ -376,13 +417,15 @@ def get_data(transform, mode='train'):
                          transform=transform,
                          seq_len=args.seq_len,
                          num_seq=args.num_seq,
-                         downsample=args.ds)
+                         downsample=args.ds,
+                         return_label=return_label)
     elif args.dataset == 'hollywood2':
         dataset = Hollywood2(mode=mode,
                              transform=transform,
                              seq_len=args.seq_len,
                              num_seq=args.num_seq,
-                             downsample=args.ds)
+                             downsample=args.ds,
+                             return_label=return_label)
     else:
         raise ValueError('dataset not supported')
 
@@ -393,7 +436,7 @@ def get_data(transform, mode='train'):
                                       batch_size=args.batch_size,
                                       sampler=sampler,
                                       shuffle=False,
-                                      num_workers=100,
+                                      num_workers=32,
                                       pin_memory=True,
                                       drop_last=True)
     elif mode == 'val':
@@ -410,7 +453,7 @@ def get_data(transform, mode='train'):
 def set_path(args):
     if args.resume: exp_path = os.path.dirname(os.path.dirname(args.resume))
     else:
-        exp_path = 'log_{args.prefix}/{args.dataset}-{args.img_dim}_{0}_{args.model}_\
+        exp_path = '../logs/log_{args.prefix}/{args.dataset}-{args.img_dim}_{0}_{args.model}_\
 bs{args.batch_size}_lr{1}_seq{args.num_seq}_pred{args.pred_step}_len{args.seq_len}_ds{args.ds}_\
 train-{args.train_what}{2}'.format(
                     'r%s' % args.net[6::], \

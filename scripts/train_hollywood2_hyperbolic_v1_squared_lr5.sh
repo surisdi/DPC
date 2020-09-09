@@ -1,0 +1,13 @@
+python main.py \
+--gpu 4,5,6,7 \
+--net resnet18 \
+--dataset hollywood2 \
+--batch_size 64 \
+--img_dim 80 \
+--epochs 600 \
+--hyperbolic \
+--hyperbolic_version 1 \
+--distance 'squared' \
+--lr 1e-5 \
+--prefix hyperbolic_hollywood_v1_squared_lr5 \
+--resume /proj/vondrick/didac/code/DPC/dpc/log_hyperbolic_hyperbolic_v1_squared_lr5/hollywood2-80_r18_dpc-rnn_bs64_lr1e-05_seq8_pred3_len5_ds3_train-all/model/epoch300.pth.tar

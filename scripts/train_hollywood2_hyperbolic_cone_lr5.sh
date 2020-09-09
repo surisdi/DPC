@@ -1,0 +1,11 @@
+python main.py \
+--gpu 4,5,6,7 \
+--net resnet18 \
+--dataset hollywood2 \
+--batch_size 64 \
+--img_dim 80 \
+--epochs 600 \
+--hyperbolic \
+--hyp_cone \
+--lr 1e-5 \
+--prefix hyperbolic_hollywood_cone_lr3

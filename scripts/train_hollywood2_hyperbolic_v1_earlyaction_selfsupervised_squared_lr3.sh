@@ -1,4 +1,4 @@
-python ../dpc/main.py \
+python main.py \
 --gpu 0,1,2,3 \
 --net resnet18 \
 --dataset hollywood2 \

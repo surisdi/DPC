@@ -1,4 +1,5 @@
-from resnet_2d3d import * 
+from backbone.resnet_2d3d import *
+
 
 def select_resnet(network, track_running_stats=True,):
     param = {'feature_size': 1024}
@@ -19,6 +20,7 @@ def select_resnet(network, track_running_stats=True,):
         model = resnet152_2d3d_full(track_running_stats=track_running_stats)
     elif network == 'resnet200':
         model = resnet200_2d3d_full(track_running_stats=track_running_stats)
-    else: raise IOError('model type is wrong')
+    else:
+        raise IOError('model type is wrong')
 
     return model, param

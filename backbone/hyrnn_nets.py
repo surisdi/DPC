@@ -8,6 +8,7 @@ import torch.nn.functional
 import math
 import geoopt.manifolds.stereographic.math as gmath
 import geoopt
+from torch.cuda.amp import autocast
 
 
 def mobius_linear(
@@ -177,15 +178,16 @@ class MobiusLinear(torch.nn.Linear):
         self.k = k
 
     def forward(self, input):
-        return mobius_linear(
-            input,
-            weight=self.weight,
-            bias=self.bias,
-            hyperbolic_input=self.hyperbolic_input,
-            nonlin=self.nonlin,
-            hyperbolic_bias=self.hyperbolic_bias,
-            k=self.k,
-        )
+        with autocast(enabled=False):  # Do not use fp16
+            return mobius_linear(
+                input,
+                weight=self.weight,
+                bias=self.bias,
+                hyperbolic_input=self.hyperbolic_input,
+                nonlin=self.nonlin,
+                hyperbolic_bias=self.hyperbolic_bias,
+                k=self.k,
+            )
 
     def extra_repr(self):
         info = super().extra_repr()
@@ -212,11 +214,12 @@ class MobiusDist2Hyperplane(torch.nn.Module):
             self.tangent = geoopt.ManifoldParameter(tangent, manifold=sphere).proj_()
 
     def forward(self, input):
-        input = input.unsqueeze(-2)
-        distance = gmath.dist2plane(
-            x=input, p=self.point, a=self.tangent, k=self.ball.c, signed=True
-        )
-        return distance * self.scale.exp()
+        with autocast(enabled=False):  # Do not use fp16
+            input = input.unsqueeze(-2)
+            distance = gmath.dist2plane(
+                x=input, p=self.point, a=self.tangent, k=self.ball.c, signed=True
+            )
+            return distance * self.scale.exp()
 
     def extra_repr(self):
         return (
@@ -300,57 +303,58 @@ class MobiusGRU(torch.nn.Module):
             torch.nn.init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input: torch.Tensor, h0=None):
-        # input shape: seq_len, batch, input_size
-        # hx shape: batch, hidden_size
-        is_packed = isinstance(input, torch.nn.utils.rnn.PackedSequence)
-        if is_packed:
-            input, batch_sizes = input[:2]
-            max_batch_size = int(batch_sizes[0])
-        else:
-            batch_sizes = None
-            max_batch_size = input.size(1)
-        if h0 is None:
-            h0 = input.new_zeros(
-                self.num_layers, max_batch_size, self.hidden_size, requires_grad=False
-            )
-        h0 = h0.unbind(0)
+        with autocast(enabled=False):  # Do not use fp16
+            # input shape: seq_len, batch, input_size
+            # hx shape: batch, hidden_size
+            is_packed = isinstance(input, torch.nn.utils.rnn.PackedSequence)
+            if is_packed:
+                input, batch_sizes = input[:2]
+                max_batch_size = int(batch_sizes[0])
+            else:
+                batch_sizes = None
+                max_batch_size = input.size(1)
+            if h0 is None:
+                h0 = input.new_zeros(
+                    self.num_layers, max_batch_size, self.hidden_size, requires_grad=False
+                )
+            h0 = h0.unbind(0)
 
 
-        #====ONLY SUPPORT 2 LAYERS====#
-        weight_ih = [self.weight_ih_1, self.weight_ih_2]
-        weight_hh = [self.weight_hh_1, self.weight_hh_2]
-        if self.bias is not None:
-            biases = [self.bias_1, self.bias_2]
-        else:
-            biases = (None,) * self.num_layers
-        outputs = []
-        last_states = []
-        out = input
-        for i in range(self.num_layers):
-            out, h_last = mobius_gru_loop(
-                input=out,
-                h0=h0[i],
-                weight_ih=weight_ih[i],
-                weight_hh=weight_hh[i],
-                bias=biases[i],
-                k=self.ball.c,
-                hyperbolic_hidden_state0=self.hyperbolic_hidden_state0 or i > 0,
-                hyperbolic_input=self.hyperbolic_input or i > 0,
-                nonlin=self.nonlin,
-                batch_sizes=batch_sizes,
-            )
-            outputs.append(out)
-            last_states.append(h_last)
-        if is_packed:
-            out = torch.nn.utils.rnn.PackedSequence(out, batch_sizes)
-        ht = torch.stack(last_states)
-        # default api assumes
-        # out: (seq_len, batch, num_directions * hidden_size)
-        # ht: (num_layers * num_directions, batch, hidden_size)
-        # if packed:
-        # out: (sum(seq_len), num_directions * hidden_size)
-        # ht: (num_layers * num_directions, batch, hidden_size)
-        return out, ht
+            #====ONLY SUPPORT 2 LAYERS====#
+            weight_ih = [self.weight_ih_1, self.weight_ih_2]
+            weight_hh = [self.weight_hh_1, self.weight_hh_2]
+            if self.bias is not None:
+                biases = [self.bias_1, self.bias_2]
+            else:
+                biases = (None,) * self.num_layers
+            outputs = []
+            last_states = []
+            out = input
+            for i in range(self.num_layers):
+                out, h_last = mobius_gru_loop(
+                    input=out,
+                    h0=h0[i],
+                    weight_ih=weight_ih[i],
+                    weight_hh=weight_hh[i],
+                    bias=biases[i],
+                    k=self.ball.c,
+                    hyperbolic_hidden_state0=self.hyperbolic_hidden_state0 or i > 0,
+                    hyperbolic_input=self.hyperbolic_input or i > 0,
+                    nonlin=self.nonlin,
+                    batch_sizes=batch_sizes,
+                )
+                outputs.append(out)
+                last_states.append(h_last)
+            if is_packed:
+                out = torch.nn.utils.rnn.PackedSequence(out, batch_sizes)
+            ht = torch.stack(last_states)
+            # default api assumes
+            # out: (seq_len, batch, num_directions * hidden_size)
+            # ht: (num_layers * num_directions, batch, hidden_size)
+            # if packed:
+            # out: (sum(seq_len), num_directions * hidden_size)
+            # ht: (num_layers * num_directions, batch, hidden_size)
+            return out, ht
 
     def extra_repr(self):
         return (

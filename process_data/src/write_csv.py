@@ -12,7 +12,7 @@ def write_list(data_list, path, ):
             if row: writer.writerow(row)
     print('split saved to %s' % path)
 
-def main_UCF101(f_root, splits_root, csv_root='../data/ucf101/'):
+def main_UCF101(f_root, splits_root, csv_root='process_data/data/ucf101/'):
     '''generate training/testing split, count number of available frames, save in csv'''
     if not os.path.exists(csv_root): os.makedirs(csv_root)
     for which_split in [1,2,3]:
@@ -34,7 +34,7 @@ def main_UCF101(f_root, splits_root, csv_root='../data/ucf101/'):
         write_list(test_set, os.path.join(csv_root, 'test_split%02d.csv' % which_split))
 
 
-def main_HMDB51(f_root, splits_root, csv_root='../data/hmdb51/'):
+def main_HMDB51(f_root, splits_root, csv_root='process_data/data/hmdb51/'):
     '''generate training/testing split, count number of available frames, save in csv'''
     if not os.path.exists(csv_root): os.makedirs(csv_root)
     for which_split in [1,2,3]:
@@ -77,7 +77,7 @@ def check_exists(row, root):
     else:
         return None
 
-def main_Kinetics400(mode, k400_path, f_root, csv_root='../data/kinetics400'):
+def main_Kinetics400(mode, k400_path, f_root, csv_root='process_data/data/kinetics400'):
     train_split_path = os.path.join(k400_path, 'kinetics_train/kinetics_train.csv')
     val_split_path = os.path.join(k400_path, 'kinetics_val/kinetics_val.csv')
     test_split_path = os.path.join(k400_path, 'kinetics_test/kinetics_test.csv')
@@ -95,7 +95,7 @@ def main_Kinetics400(mode, k400_path, f_root, csv_root='../data/kinetics400'):
     else:
         raise IOError('wrong mode')
 
-def main_Kinetics600(mode, k600_path, f_root, csv_root='../data/kinetics600'):
+def main_Kinetics600(mode, k600_path, f_root, csv_root='process_data/data/kinetics600'):
     train_split_path = os.path.join(k600_path, 'kinetics-600_train.csv')
     val_split_path = os.path.join(k600_path, 'kinetics-600_val.csv')
     test_split_path = os.path.join(k600_path, 'kinetics-600_test.csv')
@@ -113,7 +113,7 @@ def main_Kinetics600(mode, k600_path, f_root, csv_root='../data/kinetics600'):
         raise IOError('wrong mode')
 
 
-def main_Hollywood2(path, csv_root='../data/hollywood2'):
+def main_Hollywood2(path, csv_root='process_data/data/hollywood2'):
     if not os.path.exists(csv_root): os.makedirs(csv_root)
     with open(os.path.join(csv_root, f'test_split.csv'), 'w') as f_test, \
             open(os.path.join(csv_root, f'train_split.csv'), 'w') as f_train:
@@ -146,12 +146,12 @@ if __name__ == '__main__':
     # main_Kinetics400(mode='train', # train or val or test
     #                  k400_path='your_path/Kinetics',
     #                  f_root='your_path/Kinetics400_256/frame',
-    #                  csv_root='../data/kinetics400_256')
+    #                  csv_root='process_data/data/kinetics400_256')
 
     # main_Kinetics600(mode='test',  # train or val or test
     #                  k600_path='/proj/vondrick/datasets/kinetics-600/data',
     #                  f_root='/proj/vondrick/datasets/kinetics-600/data/extracted_frames',
-    #                  csv_root='../data/kinetics600')
+    #                  csv_root='process_data/data/kinetics600')
 
     main_Hollywood2(path='/proj/vondrick/datasets/Hollywood2',
-                    csv_root='../data/hollywood2')
+                    csv_root='process_data/data/hollywood2')

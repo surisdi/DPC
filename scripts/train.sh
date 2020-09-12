@@ -1,5 +1,11 @@
-python main.py \
---gpu 0,1,2,3 \
+#!/usr/bin/env bash
+CUDA_VISIBLE_DEVICES=4,5 NCCL_LL_THRESHOLD=0 python \
+-W ignore \
+-i \
+-m torch.distributed.launch \
+--master_port=9994 \
+--nproc_per_node=2 \
+main.py \
 --net resnet18 \
 --dataset k600 \
 --batch_size 64 \

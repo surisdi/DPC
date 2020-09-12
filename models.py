@@ -1,28 +1,22 @@
-import sys
 import time
 import math
-import random
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-sys.path.append('../backbone')
-sys.path.append('../util')
-from hyp_cone import HypConeDist
-from select_backbone import select_resnet
-from hyptorch_math import dist_matrix
-from convrnn import ConvGRU
-from hyrnn_nets import MobiusGRU, MobiusLinear, MobiusDist2Hyperplane
+from utils.hyp_cone import HypConeDist
+from backbone.select_backbone import select_resnet
+from backbone.convrnn import ConvGRU
+from backbone.hyrnn_nets import MobiusGRU, MobiusLinear, MobiusDist2Hyperplane
 import geoopt.manifolds.stereographic.math as gmath
 import geoopt
 
 
-class DPC_RNN(nn.Module):
+class Model(nn.Module):
     '''DPC with RNN'''
-    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network='resnet50', loss='dot',
-                 hyperbolic_version=1, distance='regular', margin=0.1, early_action=False,
-                 early_action_self=False, nclasses=0):
-        super(DPC_RNN, self).__init__()
+    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network_feature='resnet50', hyperbolic=False,
+                 hyperbolic_version=1, hyp_cone=False, distance='regular', margin=0.1, early_action=False,
+                 early_action_self=False, nclasses=0, downstream=False):
+        super(Model, self).__init__()
         torch.cuda.manual_seed(233)
         print('Using DPC-RNN model')
         self.sample_size = sample_size
@@ -33,9 +27,10 @@ class DPC_RNN(nn.Module):
         self.last_size = int(math.ceil(sample_size / 32))
         self.margin = margin
         self.nclasses = nclasses
+        self.downstream=downstream
         print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
-        self.backbone, self.param = select_resnet(network, track_running_stats=False)
+        self.backbone, self.param = select_resnet(network_feature, track_running_stats=False)
         self.param['num_layers'] = 1 # param for GRU
         self.param['hidden_size'] = self.param['feature_size'] # param for GRU
         """
@@ -65,7 +60,7 @@ class DPC_RNN(nn.Module):
                                kernel_size=1,
                                num_layers=self.param['num_layers'])
 
-        if self.early_action and not self.early_action_self:
+        if downstream or (self.early_action and not self.early_action_self):
             if hyperbolic:
                 self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], self.nclasses)
             else:
@@ -242,7 +237,7 @@ class DPC_RNN(nn.Module):
                 pred_temp_size = self.num_seq -1 if self.early_action_self else self.pred_step
                 score = score.view(B, pred_temp_size, self.last_size**2, B, N, self.last_size**2)
 
-        else: # euclidean dot product
+        else:  # euclidean dot product
             score = torch.matmul(pred, feature_inf.transpose(0,1))
             score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
 
@@ -250,7 +245,7 @@ class DPC_RNN(nn.Module):
 
         del feature_inf, pred
 
-        if self.mask is None:  # only compute mask once
+        if self.mask is None:  # only compute mask once0
             self.compute_mask(B, N)
 
         d = time.time()

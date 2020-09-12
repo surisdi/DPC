@@ -1,19 +1,12 @@
 import torch
 from torch.utils import data
-from torchvision import transforms
 import os
-import sys
 import time
-import pickle
-import glob
-import csv
 import pandas as pd
 import numpy as np
-import cv2
-sys.path.append('../utils')
-from augmentation import *
+from utils.augmentation import Image
 from tqdm import tqdm
-from joblib import Parallel, delayed
+
 
 def pil_loader(path):
     try:
@@ -51,7 +44,7 @@ class Kinetics400_full_3d(data.Dataset):
         # get action list
         self.action_dict_encode = {}
         self.action_dict_decode = {}
-        action_file = os.path.join('../process_data/data/kinetics400', 'classInd.txt')
+        action_file = os.path.join('process_data/data/kinetics400', 'classInd.txt')
         action_df = pd.read_csv(action_file, sep=',', header=None)
         for _, row in action_df.iterrows():
             act_id, act_name = row
@@ -62,18 +55,18 @@ class Kinetics400_full_3d(data.Dataset):
         # splits
         if big:
             if mode == 'train':
-                split = '../process_data/data/kinetics400_256/train_split.csv'
+                split = 'process_data/data/kinetics400_256/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/kinetics400_256/val_split.csv'
+                split = 'process_data/data/kinetics400_256/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else: raise ValueError('wrong mode')
         else: # small
             if mode == 'train':
-                split = '../process_data/data/kinetics400/train_split.csv'
+                split = 'process_data/data/kinetics400/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/kinetics400/val_split.csv'
+                split = 'process_data/data/kinetics400/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else: raise ValueError('wrong mode')
 
@@ -165,24 +158,24 @@ class Kinetics600_full_3d(data.Dataset):
         # splits
         if big:
             if mode == 'train':
-                split = '../process_data/data/kinetics600/train_split.csv'
+                split = 'process_data/data/kinetics600/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/kinetics600/val_split.csv'
+                split = 'process_data/data/kinetics600/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
         else:  # small
             if mode == 'train':
-                split = '../process_data/data/kinetics600/train_split.csv'
+                split = 'process_data/data/kinetics600/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/kinetics600/val_split.csv'
+                split = 'process_data/data/kinetics600/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
 
-        path_drop_idx = f'../process_data/data/drop_idx_{mode}.pth'
+        path_drop_idx = f'process_data/data/drop_idx_{mode}.pth'
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:
@@ -364,24 +357,24 @@ class Hollywood2(data.Dataset):
         # splits
         if big:
             if mode == 'train':
-                split = '../process_data/data/hollywood2/train_split.csv'
+                split = 'process_data/data/hollywood2/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/hollywood2/test_split.csv'
+                split = 'process_data/data/hollywood2/test_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
         else:  # small
             if mode == 'train':
-                split = '../process_data/data/hollywood2/train_split.csv'
+                split = 'process_data/data/hollywood2/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = '../process_data/data/hollywood2/test_split.csv'
+                split = 'process_data/data/hollywood2/test_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
 
-        path_drop_idx = f'../process_data/data/drop_idx_hollywood_{mode}.pth'
+        path_drop_idx = f'process_data/data/drop_idx_hollywood_{mode}.pth'
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:

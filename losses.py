@@ -2,17 +2,18 @@ import torch
 import utils.utils as utils
 import geoopt
 from utils.hyp_cone import HypConeDist
+import time
 
 
-def compute_loss(args, score, pred_norm, gt_norm, labels, target, sizes, avg_meters):
-    B = score.shape[0]
+def compute_loss(args, score, pred, labels, target, sizes, B, avg_meters, pred_norm, gt_norm):
+
     if args.finetune or (args.early_action and not args.early_action_self):
         gt = labels.repeat_interleave(args.num_seq).to(args.device)
-        loss = torch.nn.functional.cross_entropy(score, gt)
-        accuracy = (torch.argmax(score, dim=1) == gt).float().mean()
+        loss = torch.nn.functional.cross_entropy(pred, gt)
+        accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
 
         # Bookkeeping
-        avg_meters['losses'].update(loss.item(), score.shape[0] / args.num_seq)
+        avg_meters['losses'].update(loss.item(), pred.shape[0] / args.num_seq)
         avg_meters['accuracy'].update(accuracy, B)
 
     else:
@@ -43,10 +44,11 @@ def compute_loss(args, score, pred_norm, gt_norm, labels, target, sizes, avg_met
             # Bookkeeping
             avg_meters['pos_acc'].update(pos_acc, B)
             avg_meters['neg_acc'].update(neg_acc, B)
-            avg_meters['p_norm'].update(pred_norm.item())
-            avg_meters['g_norm'].update(gt_norm.item())
             avg_meters['losses'].update(loss.item() / (2 * k ** 2), B)
             avg_meters['accuracy'].update(pos_acc, B)
+            if args.hyp_cone_ruoshi:
+                avg_meters['p_norm'].update(pred_norm.item())
+                avg_meters['g_norm'].update(gt_norm.item())
 
         else:
             _, B2, NS, NP, SQ = sizes
@@ -70,7 +72,11 @@ def compute_loss(args, score, pred_norm, gt_norm, labels, target, sizes, avg_met
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):
+    if args.finetune or (args.early_action and not args.early_action_self):
+        return None, None, None  # No need to compute scores
+
     last_size, size_gt, size_pred = sizes
+    pred_norm = gt_norm = None
 
     if args.hyperbolic:
 
@@ -81,7 +87,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         if args.hyp_cone:
 
             dist_fn = HypConeDist(K=0.1)
-            score = dist_fn(pred_expand, gt_expand)
+            score = dist_fn(pred_expand.float(), gt_expand.float())
 
             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
             score = score.reshape(B * size_pred * last_size ** 2, B * size_gt * last_size ** 2)
@@ -106,7 +112,8 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
             manif = geoopt.manifolds.PoincareBall(c=1)
 
-            score = manif.dist(pred_expand, gt_expand)
+            # score = manif.dist(pred_expand, gt_expand)
+            score = manif.dist(pred_expand.half(), gt_expand.half())
             if args.distance == 'squared':
                 score = score.pow(2)
             elif args.distance == 'cosh':
@@ -121,12 +128,12 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         score = torch.matmul(pred, feature_dist.transpose(0, 1))
         score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
 
-    return score
+    return score, pred_norm, gt_norm
 
 
 def compute_mask(args, sizes, B):
-    if args.early_action and not args.early_action_self:
-        return None  # No need to compute mask
+    if args.finetune or (args.early_action and not args.early_action_self):
+        return None, None  # No need to compute mask
 
     last_size, size_gt, size_pred = sizes
 
@@ -142,11 +149,23 @@ def compute_mask(args, sizes, B):
             mask[k, :, torch.arange(last_size ** 2), k, :, torch.arange(last_size ** 2)] = -1  # temporal neg
 
     tmp = mask.permute(0,2,1,3,5,4).reshape(B * last_size ** 2, size_pred, B * last_size ** 2, size_gt)
-    for j in range(B * last_size ** 2):
-        tmp[j, torch.arange(self.pred_step), j, torch.arange(N - self.pred_step, N)] = 1  # pos
-    tmp[torch.arange(B * last_size ** 2), :, torch.arange(B * last_size ** 2)] = 1  # pos
+
+    if args.early_action_self:
+        tmp[torch.arange(B * last_size ** 2), :, torch.arange(B * last_size ** 2)] = 1  # pos
+    else:
+        assert size_gt == size_pred
+        for j in range(B * last_size ** 2):
+            tmp[j, torch.arange(size_pred), j, torch.arange(size_gt)] = 1  # pos
 
     mask = tmp.view(B, last_size ** 2, size_pred, B, last_size ** 2, size_gt).permute(0, 2, 1, 3, 5, 4)
 
-    return mask
+    # Now, given task mask as input, compute the target for contrastive loss
+    if mask is None:
+        return None, None
+    # dot product is computed in parallel gpus, so get less easy neg, bounded by batch size in each gpu'''
+    # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
+    (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]
+    target = mask == 1
+    target.requires_grad = False
+    return target, (B, B2, NS, NP, SQ)
 

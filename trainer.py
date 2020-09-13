@@ -24,7 +24,7 @@ class Trainer:
         self.model_path = model_path
         self.scheduler = scheduler
         self.scaler = GradScaler()
-        self.mask = None
+        self.target = self.sizes = None
 
     def train(self):
         # --- main loop --- #
@@ -80,20 +80,18 @@ class Trainer:
                     with torch.set_grad_enabled(train):
                         pred, feature_dist, sizes = self.model(input_seq)
 
-                    # if self.args.parallel == 'ddp':
-                    #     tensors_to_gather = [score, mask, pred_norm, gt_norm, labels]
-                    #     for i, v in enumerate(tensors_to_gather):
-                    #         tensors_to_gather[i] = gather_tensor(v)
-                    #     score, mask, pred_norm, gt_norm, labels = tensors_to_gather
+                    if self.args.parallel == 'ddp':
+                        tensors_to_gather = [pred, feature_dist, labels]
+                        for i, v in enumerate(tensors_to_gather):
+                            tensors_to_gather[i] = gather_tensor(v)
+                        pred, feature_dist, labels = tensors_to_gather
 
-                    score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
-                    if self.mask is None:
-                        self.mask = losses.compute_mask(self.args, sizes, labels.shape[0])
+                    score, pred_norm, gt_norm = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
+                    if self.target is None:
+                        self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
 
-                    if idx == 0:
-                        target, sizes = process_output(self.mask)
-                    loss = losses.compute_loss(self.args, score, pred_norm, gt_norm, labels, target, sizes,
-                                               avg_meters)
+                    loss = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes, labels.shape[0],
+                                               avg_meters, pred_norm, gt_norm)
 
                 del score, input_seq
 
@@ -129,18 +127,6 @@ class Trainer:
             accuracy_list = {k: v.local_avg for k, v in avg_meters.items() if v.count > 0}
 
             return accuracy_list
-
-
-def process_output(mask):
-    """task mask as input, compute the target for contrastive loss"""
-    if mask is None:
-        return None, None
-    # dot product is computed in parallel gpus, so get less easy neg, bounded by batch size in each gpu'''
-    # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
-    (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]
-    target = mask == 1
-    target.requires_grad = False
-    return target, (B, B2, NS, NP, SQ)
 
 
 def gather_tensor(v):

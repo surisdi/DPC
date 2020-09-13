@@ -83,7 +83,7 @@ def get_args():
     if args.early_action_self:
         assert args.early_action, 'Read the explanation'
         assert args.pred_step == 1, 'We only want to predict the last one'
-    elif args.early_action:
+    elif args.early_action or args.finetune:
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
@@ -129,7 +129,6 @@ def main():
                          early_action_self=args.early_action_self,
                          nclasses=args.n_classes,
                          downstream=args.finetune,
-                         hyp_cone_ruoshi=args.hyp_cone_ruoshi
                          )
 
     model = model.to(args.device)

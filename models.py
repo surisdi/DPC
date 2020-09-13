@@ -13,7 +13,7 @@ class Model(nn.Module):
     '''DPC with RNN'''
     def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network_feature='resnet50', hyperbolic=False,
                  hyperbolic_version=1, hyp_cone=False, distance='regular', margin=0.1, early_action=False,
-                 early_action_self=False, nclasses=0, downstream=False, hyp_cone_ruoshi=False):
+                 early_action_self=False, nclasses=0, downstream=False):
         super(Model, self).__init__()
         torch.cuda.manual_seed(233)
         # print('Using DPC-RNN model')
@@ -25,7 +25,7 @@ class Model(nn.Module):
         self.last_size = int(math.ceil(sample_size / 32))
         self.margin = margin
         self.nclasses = nclasses
-        self.downstream=downstream
+        self.downstream = downstream
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
         self.backbone, self.param = select_resnet(network_feature, track_running_stats=False)
@@ -41,7 +41,6 @@ class Model(nn.Module):
         self.hyperbolic_version = hyperbolic_version
         self.distance = distance
         self.hyp_cone = hyp_cone
-        self.hyp_cone_ruoshi = hyp_cone_ruoshi
         self.margin = margin
         self.early_action = early_action
         self.early_action_self = early_action_self
@@ -120,17 +119,10 @@ class Model(nn.Module):
         # [B,N,D,6,6], [0, +inf)
         feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
 
-        # ### aggregate, predict future ###
-        # if self.hyperbolic:
-        #     feature_shape = feature.shape
-        #     feature = feature.view(-1, feature_shape[-1])
-        #     _, hidden = self.huperbolic_agg(feature[:, 0:N - self.pred_step, :].contiguous())
-        #     hidden = hidden.view(feature_shape)
-        # else:
         hidden_all, hidden = self.agg(feature[:, 0:N-self.pred_step, :].contiguous())
         hidden = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
 
-        if self.early_action and not self.early_action_self:
+        if self.downstream or (self.early_action and not self.early_action_self):
             # pool
             pooled_hidden = hidden_all.mean(dim=[-2, -1]).view(-1, hidden_all.shape[2])  # just pool spatially
             # Predict label supervisedly

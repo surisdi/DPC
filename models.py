@@ -3,22 +3,20 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.hyp_cone import HypConeDist
 from backbone.select_backbone import select_resnet
 from backbone.convrnn import ConvGRU
 from backbone.hyrnn_nets import MobiusGRU, MobiusLinear, MobiusDist2Hyperplane
 import geoopt.manifolds.stereographic.math as gmath
-import geoopt
 
 
 class Model(nn.Module):
     '''DPC with RNN'''
     def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network_feature='resnet50', hyperbolic=False,
                  hyperbolic_version=1, hyp_cone=False, distance='regular', margin=0.1, early_action=False,
-                 early_action_self=False, nclasses=0, downstream=False):
+                 early_action_self=False, nclasses=0, downstream=False, hyp_cone_ruoshi=False):
         super(Model, self).__init__()
         torch.cuda.manual_seed(233)
-        print('Using DPC-RNN model')
+        # print('Using DPC-RNN model')
         self.sample_size = sample_size
         self.num_seq = num_seq
         self.seq_len = seq_len
@@ -28,7 +26,7 @@ class Model(nn.Module):
         self.margin = margin
         self.nclasses = nclasses
         self.downstream=downstream
-        print('final feature map has size %dx%d' % (self.last_size, self.last_size))
+        # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
         self.backbone, self.param = select_resnet(network_feature, track_running_stats=False)
         self.param['num_layers'] = 1 # param for GRU
@@ -43,7 +41,8 @@ class Model(nn.Module):
         self.hyperbolic_version = hyperbolic_version
         self.distance = distance
         self.hyp_cone = hyp_cone
-        self.margin=margin
+        self.hyp_cone_ruoshi = hyp_cone_ruoshi
+        self.margin = margin
         self.early_action = early_action
         self.early_action_self = early_action_self
         if hyperbolic:
@@ -77,42 +76,49 @@ class Model(nn.Module):
         self.relu = nn.ReLU(inplace=False)
         self._initialize_weights(self.agg)
 
-
     def forward(self, block):
         a = time.time()
         # block: [B, N, C, SL, W, H]
-        ### extract feature ###
         (B, N, C, SL, H, W) = block.shape
+
+        # ----------- STEP 1: compute features ------- #
+        # features_dist are the features used to compute the distance
+        # features_g are the features used to input to the prediction network
 
         block = block.view(B*N, C, SL, H, W)
         feature = self.backbone(block)
         del block
         feature = F.avg_pool3d(feature, (self.last_duration, 1, 1), stride=(1, 1, 1))
 
-        if self.hyperbolic and self.hyperbolic_version == 2:
-            feature_shape = feature.shape
-            feature_hyp = feature.permute(0,2,3,4,1).contiguous() / 10
-            feature_hyp_shape = feature_hyp.shape
-            feature_hyp = feature_hyp.view(-1, feature.shape[1]).double()
-            feature_hyp = self.hyperbolic_linear(feature_hyp)
-            feature_hyp = feature_hyp.view(feature_hyp_shape)
-            feature_hyp = feature_hyp.permute(0,4,1,2,3)
-            assert feature_hyp.shape == feature_shape
+        if self.hyperbolic:
+            feature_reshape = feature.permute(0, 2, 3, 4, 1)
+            mid_feature_shape = feature_reshape.shape
+            feature_reshape = feature_reshape.reshape(-1, feature.shape[1])
+            feature_dist = self.hyperbolic_linear(feature_reshape)
+            # feature_dist = gmath.expmap0(feature_reshape, k=torch.tensor(-1.))
+            feature_dist = feature_dist.reshape(mid_feature_shape).permute(0, 4, 1, 2, 3)
 
-            feature_inf_all = feature_hyp.view(B, N, self.param['feature_size'], self.last_size, self.last_size) # before ReLU, (-inf, +inf)
+            if self.hyperbolic_version == 1:
+                # Do not modify Euclidean feature for g, but compute hyperbolic version for the distance later
+                feature_g = feature
 
-            # project back to euclidean
-            feature = gmath.logmap0(feature_hyp, k=torch.tensor(-1.), dim=1).float()
-
+            else:  # hyperbolic version 2
+                # Move to hyperbolic with linear layer, then create feature_g from there (back to Euclidean)
+                # project back to euclidean
+                feature_g = gmath.logmap0(feature_dist, k=torch.tensor(-1.), dim=1).float()
         else:
-            feature_inf_all = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size) # before ReLU, (-inf, +inf)
+            feature_dist = feature_g = feature
 
-        feature_inf = feature_inf_all[:, N-self.pred_step::, :].contiguous()
+        # before ReLU, (-inf, +inf)
+        feature_dist = feature_dist.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
+        feature_dist = feature_dist[:, N-self.pred_step::, :].contiguous()
+        feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.pred_step*self.last_size**2, self.param['feature_size'])  # .transpose(0,1)
 
-        feature = self.relu(feature) # [0, +inf)
-        feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size) # [B,N,D,6,6], [0, +inf)
+        # ----------- STEP 2: compute predictions ------- #
 
-        del feature_inf_all
+        feature = self.relu(feature_g)  # [0, +inf)
+        # [B,N,D,6,6], [0, +inf)
+        feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
 
         # ### aggregate, predict future ###
         # if self.hyperbolic:
@@ -130,129 +136,40 @@ class Model(nn.Module):
             # Predict label supervisedly
             if self.hyperbolic:
                 feature_shape = pooled_hidden.shape
-                pooled_hidden = pooled_hidden.view(-1, feature_shape[-1]).double() / 10
+                pooled_hidden = pooled_hidden.view(-1, feature_shape[-1]).double()
                 pooled_hidden = self.hyperbolic_linear(pooled_hidden)
                 pooled_hidden = pooled_hidden.view(feature_shape)
             pred_classes = self.network_class(pooled_hidden)
-
-            return pred_classes, None
-
-        if self.early_action_self:
-            # only one step but for all hidden_all, not just the last hidden
-            pred = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).view_as(hidden_all)
-            pred = pred.permute(0, 1, 3, 4, 2).contiguous().view(B * hidden_all.shape[1] * self.last_size ** 2,
-                                                                 self.param['feature_size'])
+            pred = pred_classes
+            size_pred = 1
 
         else:
-            pred = []
-            for i in range(self.pred_step):
-                # sequentially pred future
-
-                # if self.loss == 'hyp_poincare':
-                #     p_tmp = self.hyperbolic_network_pred(hidden)
-                #     pred.append(p_tmp)
-                #     p_tmp_shape = p_tmp.shape
-                #     p_tmp = p_tmp.view(-1, p_tmp_shape[-1])
-                #     _, hidden = self.hyperbolic_agg(self.relu(p_tmp).unsqueeze(1), hidden.unsqueeze(0))
-                #     hidden = hidden.view(p_tmp_shape)
-                # else:
-                p_tmp = self.network_pred(hidden)
-                pred.append(p_tmp)
-                _, hidden = self.agg(self.relu(p_tmp).unsqueeze(1), hidden.unsqueeze(0))
-                hidden = hidden[:,-1,:]
-            pred = torch.stack(pred, 1) # B, pred_step, xxx
-            pred = pred.permute(0, 1, 3, 4, 2).contiguous().view(B * self.pred_step * self.last_size ** 2,
-                                                                 self.param['feature_size'])
-
-            del hidden
-
-
-        ### Get similarity score ###
-        # pred: [B, pred_step, D, last_size, last_size]
-        # GT: [B, N, D, last_size, last_size]
-        N = self.pred_step
-        # dot product D dimension in pred-GT pair, get a 6d tensor. First 3 dims are from pred, last 3 dims are from GT. 
-        pred = pred.permute(0,1,3,4,2).contiguous().view(B*self.pred_step*self.last_size**2, self.param['feature_size'])
-        feature_inf = feature_inf.permute(0,1,3,4,2).contiguous().view(B*N*self.last_size**2, self.param['feature_size'])  #.transpose(0,1)
-
-        b = time.time()
-        if self.hyperbolic:
-            # TODO clean and make less "if-else", and more general.
-            if self.hyperbolic_version == 1:
-                feature_shape = feature_inf.shape
-                feature_inf_hyp = feature_inf.view(-1, feature_shape[-1]).double()
-                feature_inf_hyp = self.hyperbolic_linear(feature_inf_hyp)
-                # feature_inf_hyp = gmath.expmap0(feature_inf_hyp, k=torch.tensor(-1.))
-                feature_inf_hyp = feature_inf_hyp.view(feature_shape)
-
-            else:  # hyperbolic2
-                feature_inf_hyp = feature_inf  # was already in hyperbolic space
-
-            pred_shape = pred.shape
-            pred_hyp = pred.view(-1, pred_shape[-1]).double()
-            pred_hyp = self.hyperbolic_linear(pred_hyp)
-            # pred_hyp = gmath.expmap0(pred_hyp, k=torch.tensor(-1.))
-            pred_hyp = pred_hyp.view(pred_shape)
-
-            pred_norm, gt_norm = None, None
-            if self.hyp_cone:
-                shape_expand = (pred_hyp.shape[0], pred_hyp.shape[0], pred_hyp.shape[1])
-                dist_fn = HypConeDist(K=0.1)
-                pred_flatten = pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-                gt_flatten = feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-                score = dist_fn(pred_flatten, gt_flatten)
-
-                # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
-                score = score.reshape(B * self.pred_step * self.last_size ** 2,
-                                      B * self.pred_step * self.last_size ** 2)
-
-                # TODO put as option. Ruoshi version
-                # pred_norm = torch.mean(torch.norm(pred_flatten, p=2, dim=-1))
-                # gt_norm = torch.mean(torch.norm(gt_flatten, p=2, dim=-1))
-                # score[score < 0] = 0
-                # pos = score.diagonal(dim1=-2, dim2=-1)
-                # score = self.margin - score
-                # score[score < 0] = 0
-                # k = score.size(0)
-                # # positive score is multiplied by number of negative samples
-                # weight = 1
-                # score.as_strided([k], [k + 1]).copy_(pos * (k - 1) * weight);
+            if self.early_action_self:
+                # only one step but for all hidden_all, not just the last hidden
+                pred = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).view_as(hidden_all)
 
             else:
-                # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
-                # Maybe more accurate (it is more specific for poincare)
-                # But this is much faster... TODO implement batch dist_matrix on geoopt library
-                # score = dist_matrix(pred_hyp, feature_inf_hyp)
+                pred = []
+                for i in range(self.pred_step):
+                    # sequentially pred future
+                    p_tmp = self.network_pred(hidden)
+                    pred.append(p_tmp)
+                    _, hidden = self.agg(self.relu(p_tmp).unsqueeze(1), hidden.unsqueeze(0))
+                    hidden = hidden[:,-1,:]
+                pred = torch.stack(pred, 1)  # B, pred_step, xxx
 
-                manif = geoopt.manifolds.PoincareBall(c=1)
-                shape_expand = (pred_hyp.shape[0], feature_inf_hyp.shape[0], pred_hyp.shape[1])
-                score = manif.dist(pred_hyp.unsqueeze(1).expand(shape_expand).contiguous().view(-1, shape_expand[-1]),
-                                   feature_inf_hyp.unsqueeze(0).expand(shape_expand).contiguous().view(-1, shape_expand[-1])
-                                   ).view(shape_expand[:2])
-                if self.distance == 'squared':
-                    score = score.pow(2)
-                elif self.distance == 'cosh':
-                    score = torch.cosh(score).pow(2)
-                score = - score.float()
-                pred_temp_size = self.num_seq -1 if self.early_action_self else self.pred_step
-                score = score.view(B, pred_temp_size, self.last_size**2, B, N, self.last_size**2)
+                del hidden
 
-        else:  # euclidean dot product
-            score = torch.matmul(pred, feature_inf.transpose(0,1))
-            score = score.view(B, self.pred_step, self.last_size**2, B, N, self.last_size**2)
+            size_pred = pred.shape[1]
+            pred = pred.permute(0, 1, 3, 4, 2)
+            pred = pred.reshape(-1, pred.shape[-1])
 
-        c = time.time()
+            if self.hyperbolic:
+                pred = self.hyperbolic_linear(pred)
 
-        del feature_inf, pred
+        sizes = self.last_size, self.pred_step, size_pred
 
-        if self.mask is None:  # only compute mask once0
-            self.compute_mask(B, N)
-
-        d = time.time()
-
-        # print(b-a, c-b, d-c)
-
-        return score, self.mask, pred_norm, gt_norm
+        return pred, feature_dist, sizes
 
     def _initialize_weights(self, module):
         for name, param in module.named_parameters():
@@ -264,32 +181,3 @@ class Model(nn.Module):
 
     def reset_mask(self):
         self.mask = None
-
-    def compute_mask(self, B, N):
-        # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
-        if self.early_action_self:
-            # Here NO temporal neg! All steps try to predict the last one
-            mask = torch.zeros((B, self.num_seq - 1, self.last_size ** 2, B, N, self.last_size ** 2), dtype=torch.int8,
-                               requires_grad=False).detach().cuda()
-            mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
-            tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B * self.last_size ** 2, self.num_seq - 1,
-                                                                   B * self.last_size ** 2, N)
-            for j in range(B * self.last_size ** 2):
-                tmp[j, torch.arange(self.num_seq - 1), j, torch.arange(N - self.pred_step, N)] = 1  # pos
-            mask = tmp.view(B, self.last_size ** 2, self.num_seq - 1, B, self.last_size ** 2, N).permute(0, 2, 1, 3, 5,
-                                                                                                         4)
-            self.mask = mask
-        else:
-            mask = torch.zeros((B, self.pred_step, self.last_size ** 2, B, N, self.last_size ** 2), dtype=torch.int8,
-                               requires_grad=False).detach().cuda()
-            mask[torch.arange(B), :, :, torch.arange(B), :, :] = -3  # spatial neg
-            for k in range(B):
-                mask[k, :, torch.arange(self.last_size ** 2), k, :,
-                torch.arange(self.last_size ** 2)] = -1  # temporal neg
-            tmp = mask.permute(0, 2, 1, 3, 5, 4).contiguous().view(B * self.last_size ** 2, self.pred_step,
-                                                                   B * self.last_size ** 2, N)
-            for j in range(B * self.last_size ** 2):
-                tmp[j, torch.arange(self.pred_step), j, torch.arange(N - self.pred_step, N)] = 1  # pos
-            mask = tmp.view(B, self.last_size ** 2, self.pred_step, B, self.last_size ** 2, N).permute(0, 2, 1, 3, 5, 4)
-            self.mask = mask
-

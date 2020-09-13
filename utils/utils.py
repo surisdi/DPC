@@ -91,6 +91,8 @@ class AverageMeter(object):
         self.save_dict = {} # save mean and std here, for summary table
 
     def update(self, val, n=1, history=0, step=5):
+        if type(val) == torch.Tensor:
+            val = val.detach().cpu().numpy()
         self.val = val
         self.sum += val * n
         self.count += n

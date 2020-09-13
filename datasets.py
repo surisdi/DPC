@@ -349,10 +349,10 @@ class Hollywood2(data.Dataset):
         self.unit_test = unit_test
         self.return_label = return_label
 
-        if big:
-            print('Using Hollywood2 full data (256x256)')
-        else:
-            print('Using Hollywood2 full data (150x150)')
+        # if big:
+        #     print('Using Hollywood2 full data (256x256)')
+        # else:
+        #     print('Using Hollywood2 full data (150x150)')
 
         # splits
         if big:

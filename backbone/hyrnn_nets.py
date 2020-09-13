@@ -178,6 +178,7 @@ class MobiusLinear(torch.nn.Linear):
         self.k = k
 
     def forward(self, input):
+        input = input.double()
         with autocast(enabled=False):  # Do not use fp16
             return mobius_linear(
                 input,
@@ -214,6 +215,7 @@ class MobiusDist2Hyperplane(torch.nn.Module):
             self.tangent = geoopt.ManifoldParameter(tangent, manifold=sphere).proj_()
 
     def forward(self, input):
+        input = input.double()
         with autocast(enabled=False):  # Do not use fp16
             input = input.unsqueeze(-2)
             distance = gmath.dist2plane(
@@ -303,6 +305,7 @@ class MobiusGRU(torch.nn.Module):
             torch.nn.init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input: torch.Tensor, h0=None):
+        input = input.double()
         with autocast(enabled=False):  # Do not use fp16
             # input shape: seq_len, batch, input_size
             # hx shape: batch, hidden_size

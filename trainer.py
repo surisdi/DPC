@@ -24,6 +24,7 @@ class Trainer:
         self.model_path = model_path
         self.scheduler = scheduler
         self.scaler = GradScaler()
+        self.mask = None
 
     def train(self):
         # --- main loop --- #
@@ -31,18 +32,18 @@ class Trainer:
             accuracy_train_list = self.run_epoch(epoch, train=True)
             accuracy_val_list = self.run_epoch(epoch, train=False)
 
-            self.writers['train'].add_scalar('global/loss', accuracy_train_list['losses'], epoch)
-            self.writers['val'].add_scalar('global/loss', accuracy_val_list['losses'], epoch)
-            self.writers['train'].add_scalar('accuracy', accuracy_train_list, epoch)
-            self.writers['val'].add_scalars('accuracy', accuracy_val_list, epoch)
-
-            # save checkpoint
-            is_best = accuracy_val_list['accuracy'] > self.best_acc
-            self.best_acc = max(accuracy_val_list['accuracy'], self.best_acc)
-
             if self.args.local_rank <= 0 and not self.args.debug:
+
+                self.writers['train'].add_scalar('global/loss', accuracy_train_list['losses'], epoch)
+                self.writers['val'].add_scalar('global/loss', accuracy_val_list['losses'], epoch)
+                self.writers['train'].add_scalars('accuracy', accuracy_train_list, epoch)
+                self.writers['val'].add_scalars('accuracy', accuracy_val_list, epoch)
+
+                # save checkpoint
+                is_best = accuracy_val_list['accuracy'] > self.best_acc
+                self.best_acc = max(accuracy_val_list['accuracy'], self.best_acc)
                 save_checkpoint({'epoch': epoch + 1,
-                                 'net': self.args.feature_network,
+                                 'net': self.args.network_feature,
                                  'state_dict': (self.model.module if hasattr(self.model, 'module') else
                                                 self.model).state_dict(),
                                  'best_acc': self.best_acc,
@@ -60,7 +61,7 @@ class Trainer:
         else:
             self.model.eval()
 
-        avg_meters = {k: AverageMeter() for k in ['losses, accuracy', 'top1', 'top3' 'top5', 'pos_acc', 'neg_acc',
+        avg_meters = {k: AverageMeter() for k in ['losses', 'accuracy', 'top1', 'top3', 'top5', 'pos_acc', 'neg_acc',
                                                   'p_norm', 'g_norm', 'batch_time', 'data_time']}
 
         time_last = time.time()
@@ -72,23 +73,27 @@ class Trainer:
                 avg_meters['data_time'].update(time.time() - time_last)
 
                 input_seq = input_seq.to(self.args.device)
-                B = input_seq.size(0)
+                labels = labels.to(self.args.device)
 
                 # Get sequence predictions
                 with autocast(enabled=self.args.fp16):
                     with torch.set_grad_enabled(train):
-                        score, mask, pred_norm, gt_norm = self.model(input_seq)
+                        pred, feature_dist, sizes = self.model(input_seq)
 
-                    if self.args.parallel == 'ddp':
-                        tensors_to_gather = [score, mask, pred_norm, gt_norm]
-                        for i, v in enumerate(tensors_to_gather):
-                            tensors_to_gather[i] = gather_tensor(v)
-                        score, mask, pred_norm, gt_norm = tensors_to_gather
+                    # if self.args.parallel == 'ddp':
+                    #     tensors_to_gather = [score, mask, pred_norm, gt_norm, labels]
+                    #     for i, v in enumerate(tensors_to_gather):
+                    #         tensors_to_gather[i] = gather_tensor(v)
+                    #     score, mask, pred_norm, gt_norm, labels = tensors_to_gather
+
+                    score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
+                    if self.mask is None:
+                        self.mask = losses.compute_mask(self.args, sizes, labels.shape[0])
 
                     if idx == 0:
-                        target, sizes = process_output(mask)
+                        target, sizes = process_output(self.mask)
                     loss = losses.compute_loss(self.args, score, pred_norm, gt_norm, labels, target, sizes,
-                                               avg_meters, B)
+                                               avg_meters)
 
                 del score, input_seq
 
@@ -110,7 +115,7 @@ class Trainer:
                 postfix_kwargs = {k: v.val for k, v in avg_meters.items() if v.count > 0}
                 t.set_postfix(**postfix_kwargs)
 
-                if train:
+                if train and self.args.local_rank <= 0:
                     self.iteration += 1
                     if self.iteration % self.args.print_freq == 0 and self.writers['train'] and not self.args.debug:
                         num_outer_samples = (self.iteration + 1) * self.args.batch_size * \
@@ -118,8 +123,8 @@ class Trainer:
                         self.writers['train'].add_scalars('train', {**postfix_kwargs}, num_outer_samples)
 
             if not train and self.args.local_rank <= 0:
-                print(f'[{epoch}/{self.args.epochs}] Loss {loss.local_avg:.4f}\t' +
-                      ''.join([f'{k}: {v.local_avg}' for k, v in avg_meters.items() if v.count > 0]))
+                print(f'[{epoch}/{self.args.epochs}]' +
+                      ''.join([f'{k}: {v.local_avg:.04f}, ' for k, v in avg_meters.items() if v.count > 0]))
 
             accuracy_list = {k: v.local_avg for k, v in avg_meters.items() if v.count > 0}
 
@@ -128,6 +133,8 @@ class Trainer:
 
 def process_output(mask):
     """task mask as input, compute the target for contrastive loss"""
+    if mask is None:
+        return None, None
     # dot product is computed in parallel gpus, so get less easy neg, bounded by batch size in each gpu'''
     # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
     (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]

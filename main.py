@@ -3,6 +3,10 @@ import os
 import random
 import re
 import time
+from datetime import datetime
+
+import warnings
+warnings.simplefilter("ignore", UserWarning)
 
 import geoopt
 import matplotlib.pyplot as plt
@@ -40,6 +44,7 @@ def get_args():
     parser.add_argument('--hyperbolic_version', default=1, type=int)
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
+    parser.add_argument('--hyp_cone_ruoshi', action='store_true', help='Hyperbolic cone with ruoshi method')
     parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
@@ -65,8 +70,8 @@ def get_args():
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
     parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
+    parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
     parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
-    parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--seed', type=int, default=0, help='Random seed for initialization')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
@@ -82,6 +87,7 @@ def get_args():
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
+    assert not (args.hyp_cone_ruoshi and not args.hyp_cone), 'hyp_cone is requisite for hyp_cone_ruoshi'
 
     return args
 
@@ -122,7 +128,8 @@ def main():
                          early_action=args.early_action,
                          early_action_self=args.early_action_self,
                          nclasses=args.n_classes,
-                         downstream=args.finetune
+                         downstream=args.finetune,
+                         hyp_cone_ruoshi=args.hyp_cone_ruoshi
                          )
 
     model = model.to(args.device)
@@ -184,8 +191,8 @@ def main():
 
     # setup tools
     img_path, model_path = set_path(args)
-    writer_val = SummaryWriter(log_dir=os.path.join(img_path, 'val'))
-    writer_train = SummaryWriter(log_dir=os.path.join(img_path, 'train'))
+    writer_val = SummaryWriter(log_dir=os.path.join(img_path, 'val') if not args.debug else '/tmp') if args.local_rank <= 0 else None
+    writer_train = SummaryWriter(log_dir=os.path.join(img_path, 'train') if not args.debug else '/tmp') if args.local_rank <= 0 else None
 
     # ---------------------------- Prepare trainer and run ----------------------------- #
     if args.local_rank <= 0:
@@ -271,14 +278,13 @@ def set_path(args):
     if args.resume:
         exp_path = os.path.dirname(os.path.dirname(args.resume))
     else:
-        exp_path = f"logs/log_{args.prefix}/{args.dataset}-{args.img_dim}_r{args.network_feature[6::]}_{args.model}_" \
-                   f"bs{args.batch_size}_lr{args.old_lr if args.old_lr is not None else args.lr}_seq{args.num_seq}_" \
-                   f"pred{args.pred_step}_len{args.seq_len}_ds{args.ds}_train-{args.train_what}" \
-                   f"{'_pt=%s' % args.finetune_path.replace('/', '-') if args.finetune else ''}"
+        current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+        exp_path = f"logs/log_{args.prefix}/{current_time}"
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
-    if not os.path.exists(img_path): os.makedirs(img_path)
-    if not os.path.exists(model_path): os.makedirs(model_path)
+    if args.local_rank <= 0:
+        os.makedirs(img_path)
+        os.makedirs(model_path)
     return img_path, model_path
 
 

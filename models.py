@@ -160,6 +160,7 @@ class Model(nn.Module):
                 pred = self.hyperbolic_linear(pred)
 
         sizes = self.last_size, self.pred_step, size_pred
+        sizes = torch.tensor(sizes).to(pred.device).unsqueeze(0)
 
         return pred, feature_dist, sizes
 

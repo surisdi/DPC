@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-CUDA_VISIBLE_DEVICES=4,5 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
 --master_port=9997 \
---nproc_per_node=2 \
+--nproc_per_node=4 \
 main.py \
 --network_feature resnet18 \
 --dataset hollywood2 \

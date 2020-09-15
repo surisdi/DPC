@@ -79,12 +79,13 @@ class Trainer:
                 with autocast(enabled=self.args.fp16):
                     with torch.set_grad_enabled(train):
                         pred, feature_dist, sizes = self.model(input_seq)
+                        sizes = sizes.float().mean(0).int()
 
-                    if self.args.parallel == 'ddp':
-                        tensors_to_gather = [pred, feature_dist, labels]
-                        for i, v in enumerate(tensors_to_gather):
-                            tensors_to_gather[i] = gather_tensor(v)
-                        pred, feature_dist, labels = tensors_to_gather
+                    # if self.args.parallel == 'ddp':
+                    #     tensors_to_gather = [pred, feature_dist, labels]
+                    #     for i, v in enumerate(tensors_to_gather):
+                    #         tensors_to_gather[i] = gather_tensor(v)
+                    #     pred, feature_dist, labels = tensors_to_gather
 
                     score, pred_norm, gt_norm = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
                     if self.target is None:

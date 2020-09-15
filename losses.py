@@ -75,7 +75,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
     if args.finetune or (args.early_action and not args.early_action_self):
         return None, None, None  # No need to compute scores
 
-    last_size, size_gt, size_pred = sizes
+    last_size, size_gt, size_pred = sizes.cpu().numpy()
     pred_norm = gt_norm = None
 
     if args.hyperbolic:

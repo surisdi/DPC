@@ -92,7 +92,9 @@ class AverageMeter(object):
 
     def update(self, val, n=1, history=0, step=5):
         if type(val) == torch.Tensor:
-            val = val.detach().cpu().numpy()
+            val = val.mean().item()
+        if type(n) == torch.Tensor:
+            n = n.float().mean().item()
         self.val = val
         self.sum += val * n
         self.count += n

@@ -13,6 +13,7 @@ main.py \
 --epochs 600 \
 --hyperbolic \
 --hyp_cone \
+--hyp_cone_ruoshi \
 --lr 1e-5 \
---prefix hyperbolic_hollywood_cone_lr3 \
+--prefix hyperbolic_hollywood_cone_ruoshi_slr3 \
 --fp16

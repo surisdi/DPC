@@ -24,7 +24,7 @@ class Trainer:
         self.model_path = model_path
         self.scheduler = scheduler
         self.scaler = GradScaler()
-        self.target = self.sizes = None
+        self.target = self.sizes = None  # Only used if self.args.cross_gpu_score is True. Otherwise they are in models
 
     def train(self):
         # --- main loop --- #
@@ -78,27 +78,34 @@ class Trainer:
                 # Get sequence predictions
                 with autocast(enabled=self.args.fp16):
                     with torch.set_grad_enabled(train):
-                        pred, feature_dist, sizes = self.model(input_seq)
+                        output_model = self.model(input_seq, labels)
+
+                    if self.args.cross_gpu_score:
+                        pred, feature_dist, sizes = output_model
                         sizes = sizes.float().mean(0).int()
 
-                    # if self.args.parallel == 'ddp':
-                    #     tensors_to_gather = [pred, feature_dist, labels]
-                    #     for i, v in enumerate(tensors_to_gather):
-                    #         tensors_to_gather[i] = gather_tensor(v)
-                    #     pred, feature_dist, labels = tensors_to_gather
+                        if self.args.parallel == 'ddp':
+                            tensors_to_gather = [pred, feature_dist, labels]
+                            for i, v in enumerate(tensors_to_gather):
+                                tensors_to_gather[i] = gather_tensor(v)
+                            pred, feature_dist, labels = tensors_to_gather
 
-                    score, pred_norm, gt_norm = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
-                    if self.target is None:
-                        self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
+                        score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
+                        if self.target is None:
+                            self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
 
-                    loss = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes, labels.shape[0],
-                                               avg_meters, pred_norm, gt_norm)
+                        loss, *results = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes,
+                                                   labels.shape[0])
+                        del score
+                    else:
+                        loss, results = output_model
+                    losses.bookkeeping(self.args, avg_meters, results)
 
-                del score, input_seq
+                del input_seq
 
                 if train:
                     # Backward pass
-                    self.scaler.scale(loss).backward()
+                    self.scaler.scale(loss.mean()).backward()
                     self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     self.scaler.step(self.optimizer)

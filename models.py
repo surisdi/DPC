@@ -7,28 +7,26 @@ from backbone.select_backbone import select_resnet
 from backbone.convrnn import ConvGRU
 from backbone.hyrnn_nets import MobiusGRU, MobiusLinear, MobiusDist2Hyperplane
 import geoopt.manifolds.stereographic.math as gmath
+import losses
 
 
 class Model(nn.Module):
     '''DPC with RNN'''
-    def __init__(self, sample_size, num_seq=8, seq_len=5, pred_step=3, network_feature='resnet50', hyperbolic=False,
-                 hyperbolic_version=1, hyp_cone=False, distance='regular', margin=0.1, early_action=False,
-                 early_action_self=False, nclasses=0, downstream=False):
+    def __init__(self, args):
+
+        self.args = args
+
         super(Model, self).__init__()
         torch.cuda.manual_seed(233)
         # print('Using DPC-RNN model')
-        self.sample_size = sample_size
-        self.num_seq = num_seq
-        self.seq_len = seq_len
-        self.pred_step = pred_step
-        self.last_duration = int(math.ceil(seq_len / 4))
-        self.last_size = int(math.ceil(sample_size / 32))
-        self.margin = margin
-        self.nclasses = nclasses
-        self.downstream = downstream
+
+        self.last_duration = int(math.ceil(args.seq_len / 4))
+        self.last_size = int(math.ceil(args.img_dim / 32))
+
+        self.target = self.sizes = None  # Only used if cross_gpu_score is True. Otherwise they are in trainer
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
-        self.backbone, self.param = select_resnet(network_feature, track_running_stats=False)
+        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=False)
         self.param['num_layers'] = 1 # param for GRU
         self.param['hidden_size'] = self.param['feature_size'] # param for GRU
         """
@@ -37,14 +35,7 @@ class Model(nn.Module):
         shape.
         So we can use the hyperbolic GRU.
         """
-        self.hyperbolic = hyperbolic
-        self.hyperbolic_version = hyperbolic_version
-        self.distance = distance
-        self.hyp_cone = hyp_cone
-        self.margin = margin
-        self.early_action = early_action
-        self.early_action_self = early_action_self
-        if hyperbolic:
+        if args.hyperbolic:
             self.hyperbolic_linear = MobiusLinear(self.param['feature_size'], self.param['feature_size'],
                                                   # This computes an exmap0 after the operation, where the linear
                                                   # operation operates in the Euclidean space.
@@ -54,15 +45,15 @@ class Model(nn.Module):
                                                   ).double()
 
         self.agg = ConvGRU(input_size=self.param['feature_size'],
-                               hidden_size=self.param['hidden_size'],
-                               kernel_size=1,
-                               num_layers=self.param['num_layers'])
+                           hidden_size=self.param['hidden_size'],
+                           kernel_size=1,
+                           num_layers=self.param['num_layers'])
 
-        if downstream or (self.early_action and not self.early_action_self):
-            if hyperbolic:
-                self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], self.nclasses)
+        if args.finetune or (args.early_action and not args.early_action_self):
+            if args.hyperbolic:
+                self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
             else:
-                self.network_class = nn.Linear(self.param['feature_size'], self.nclasses)
+                self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
         else:
             self.network_pred = nn.Sequential(
                                     nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0),
@@ -75,7 +66,7 @@ class Model(nn.Module):
         self.relu = nn.ReLU(inplace=False)
         self._initialize_weights(self.agg)
 
-    def forward(self, block):
+    def forward(self, block, labels=None):
         a = time.time()
         # block: [B, N, C, SL, W, H]
         (B, N, C, SL, H, W) = block.shape
@@ -89,7 +80,7 @@ class Model(nn.Module):
         del block
         feature = F.avg_pool3d(feature, (self.last_duration, 1, 1), stride=(1, 1, 1))
 
-        if self.hyperbolic:
+        if self.args.hyperbolic:
             feature_reshape = feature.permute(0, 2, 3, 4, 1)
             mid_feature_shape = feature_reshape.shape
             feature_reshape = feature_reshape.reshape(-1, feature.shape[1])
@@ -97,7 +88,7 @@ class Model(nn.Module):
             # feature_dist = gmath.expmap0(feature_reshape, k=torch.tensor(-1.))
             feature_dist = feature_dist.reshape(mid_feature_shape).permute(0, 4, 1, 2, 3)
 
-            if self.hyperbolic_version == 1:
+            if self.args.hyperbolic_version == 1:
                 # Do not modify Euclidean feature for g, but compute hyperbolic version for the distance later
                 feature_g = feature
 
@@ -110,8 +101,8 @@ class Model(nn.Module):
 
         # before ReLU, (-inf, +inf)
         feature_dist = feature_dist.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
-        feature_dist = feature_dist[:, N-self.pred_step::, :].contiguous()
-        feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.pred_step*self.last_size**2, self.param['feature_size'])  # .transpose(0,1)
+        feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
+        feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2, self.param['feature_size'])  # .transpose(0,1)
 
         # ----------- STEP 2: compute predictions ------- #
 
@@ -119,14 +110,14 @@ class Model(nn.Module):
         # [B,N,D,6,6], [0, +inf)
         feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
 
-        hidden_all, hidden = self.agg(feature[:, 0:N-self.pred_step, :].contiguous())
+        hidden_all, hidden = self.agg(feature[:, 0:N-self.args.pred_step, :].contiguous())
         hidden = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
 
-        if self.downstream or (self.early_action and not self.early_action_self):
+        if self.args.finetune or (self.args.early_action and not self.args.early_action_self):
             # pool
             pooled_hidden = hidden_all.mean(dim=[-2, -1]).view(-1, hidden_all.shape[2])  # just pool spatially
             # Predict label supervisedly
-            if self.hyperbolic:
+            if self.args.hyperbolic:
                 feature_shape = pooled_hidden.shape
                 pooled_hidden = pooled_hidden.view(-1, feature_shape[-1]).double()
                 pooled_hidden = self.hyperbolic_linear(pooled_hidden)
@@ -136,13 +127,13 @@ class Model(nn.Module):
             size_pred = 1
 
         else:
-            if self.early_action_self:
+            if self.args.early_action_self:
                 # only one step but for all hidden_all, not just the last hidden
                 pred = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).view_as(hidden_all)
 
             else:
                 pred = []
-                for i in range(self.pred_step):
+                for i in range(self.args.pred_step):
                     # sequentially pred future
                     p_tmp = self.network_pred(hidden)
                     pred.append(p_tmp)
@@ -156,12 +147,23 @@ class Model(nn.Module):
             pred = pred.permute(0, 1, 3, 4, 2)
             pred = pred.reshape(-1, pred.shape[-1])
 
-            if self.hyperbolic:
+            if self.args.hyperbolic:
                 pred = self.hyperbolic_linear(pred)
 
-        sizes = self.last_size, self.pred_step, size_pred
+        sizes = self.last_size, self.args.pred_step, size_pred
+        sizes = torch.tensor(sizes).to(pred.device).unsqueeze(0)
 
-        return pred, feature_dist, sizes
+        if self.args.cross_gpu_score:  # Return all predictions to compute score for all gpus together
+            return pred, feature_dist, sizes
+        else:  # Compute scores individually for the data in this gpu
+            sizes = sizes.float().mean(0).int()
+            score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
+            if self.target is None:
+                self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
+
+            loss, *results = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes, labels.shape[0])
+            return loss, results
+
 
     def _initialize_weights(self, module):
         for name, param in module.named_parameters():

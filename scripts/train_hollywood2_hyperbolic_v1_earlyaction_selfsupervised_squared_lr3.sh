@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 main.py \
 --network_feature resnet18 \
 --dataset hollywood2 \
---batch_size 10 \
+--batch_size 32 \
 --img_dim 80 \
 --epochs 600 \
 --hyperbolic \

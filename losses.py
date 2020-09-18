@@ -2,36 +2,25 @@ import torch
 import utils.utils as utils
 import geoopt
 from utils.hyp_cone import HypConeDist
-import time
 
 
-def compute_loss(args, score, pred, labels, target, sizes, B, avg_meters, pred_norm, gt_norm):
+def compute_loss(args, score, pred, labels, target, sizes, B):
 
     if args.finetune or (args.early_action and not args.early_action_self):
         gt = labels.repeat_interleave(args.num_seq).to(args.device)
         loss = torch.nn.functional.cross_entropy(pred, gt)
         accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
-
-        # Bookkeeping
-        avg_meters['losses'].update(loss.item(), pred.shape[0] / args.num_seq)
-        avg_meters['accuracy'].update(accuracy, B)
+        results = accuracy, loss.item() / args.num_seq
 
     else:
         if args.hyp_cone:
-            if args.hyp_cone_ruoshi:
-                # Ruoshi version:
-                pred_norm = torch.mean(pred_norm)
-                gt_norm = torch.mean(gt_norm)
-                loss = score.sum()
-            else:
-                # Didac version
-                score[score < 0] = 0
-                pos = score.diag().clone()
-                neg = torch.relu(args.margin - score)
-                neg.fill_diagonal_(0)
-                loss_pos = pos.sum()
-                loss_neg = neg.sum() / score.shape[0]
-                loss = loss_pos + loss_neg
+            score[score < 0] = 0
+            pos = score.diag().clone()
+            neg = torch.relu(args.margin - score)
+            neg.fill_diagonal_(0)
+            loss_pos = pos.sum()
+            loss_neg = neg.sum() / score.shape[0]
+            loss = loss_pos + loss_neg
 
             [A, B] = score.shape
             score = score[:B, :]
@@ -41,14 +30,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B, avg_meters, pred_n
             score.as_strided([k], [k + 1]).copy_(torch.zeros(k))
             neg_acc = float((score == 0).sum().item() - k) / float(k ** 2 - k)
 
-            # Bookkeeping
-            avg_meters['pos_acc'].update(pos_acc, B)
-            avg_meters['neg_acc'].update(neg_acc, B)
-            avg_meters['losses'].update(loss.item() / (2 * k ** 2), B)
-            avg_meters['accuracy'].update(pos_acc, B)
-            if args.hyp_cone_ruoshi:
-                avg_meters['p_norm'].update(pred_norm.item())
-                avg_meters['g_norm'].update(gt_norm.item())
+            results = pos_acc, neg_acc, loss.item() / (2 * k ** 2)
 
         else:
             _, B2, NS, NP, SQ = sizes
@@ -61,22 +43,17 @@ def compute_loss(args, score, pred, labels, target, sizes, B, avg_meters, pred_n
             loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
             top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
 
-            # Bookkeeping
-            avg_meters['top1'].update(top1.item(), B)
-            avg_meters['top3'].update(top3.item(), B)
-            avg_meters['top5'].update(top5.item(), B)
-            avg_meters['losses'].update(loss.item(), B)
-            avg_meters['accuracy'].update(top1.item(), B)
+            results = top1, top3, top5, loss.item()
 
-    return loss
+    to_return = [loss] + [torch.tensor(r).cuda() for r in results + (B,)]
+    return to_return
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):
     if args.finetune or (args.early_action and not args.early_action_self):
-        return None, None, None  # No need to compute scores
+        return None  # No need to compute scores
 
-    last_size, size_gt, size_pred = sizes
-    pred_norm = gt_norm = None
+    last_size, size_gt, size_pred = sizes.cpu().numpy()
 
     if args.hyperbolic:
 
@@ -91,18 +68,6 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
             score = score.reshape(B * size_pred * last_size ** 2, B * size_gt * last_size ** 2)
-
-            if args.hyp_cone_ruoshi:
-                pred_norm = torch.mean(torch.norm(pred_expand, p=2, dim=-1))
-                gt_norm = torch.mean(torch.norm(gt_expand, p=2, dim=-1))
-                score[score < 0] = 0
-                pos = score.diagonal(dim1=-2, dim2=-1)
-                score = args.margin - score
-                score[score < 0] = 0
-                k = score.size(0)
-                # positive score is multiplied by number of negative samples
-                weight = 1
-                score.as_strided([k], [k + 1]).copy_(pos * (k - 1) * weight)
 
         else:
             # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
@@ -128,7 +93,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         score = torch.matmul(pred, feature_dist.transpose(0, 1))
         score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
 
-    return score, pred_norm, gt_norm
+    return score
 
 
 def compute_mask(args, sizes, B):
@@ -169,3 +134,23 @@ def compute_mask(args, sizes, B):
     target.requires_grad = False
     return target, (B, B2, NS, NP, SQ)
 
+
+def bookkeeping(args, avg_meters, results):
+    if args.finetune or (args.early_action and not args.early_action_self):
+        accuracy, loss, B = results
+        avg_meters['losses'].update(loss, B)
+        avg_meters['accuracy'].update(accuracy, B)
+    else:
+        if args.hyp_cone:
+            pos_acc, neg_acc, loss, B = results
+            avg_meters['pos_acc'].update(pos_acc, B)
+            avg_meters['neg_acc'].update(neg_acc, B)
+            avg_meters['losses'].update(loss, B)
+            avg_meters['accuracy'].update(pos_acc, B)
+        else:
+            top1, top3, top5, loss, B = results
+            avg_meters['top1'].update(top1, B)
+            avg_meters['top3'].update(top3, B)
+            avg_meters['top5'].update(top5, B)
+            avg_meters['losses'].update(loss, B)
+            avg_meters['accuracy'].update(top1, B)

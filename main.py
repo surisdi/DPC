@@ -44,7 +44,6 @@ def get_args():
     parser.add_argument('--hyperbolic_version', default=1, type=int)
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
-    parser.add_argument('--hyp_cone_ruoshi', action='store_true', help='Hyperbolic cone with ruoshi method')
     parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
@@ -77,6 +76,8 @@ def get_args():
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
     parser.add_argument('--fp16', action='store_true', help='Whether to use 16-bit float precision instead of 32-bit. '
                                                             'Only affects the Euclidean layers')
+    parser.add_argument('--cross_gpu_score', action='store_true',
+                        help='Compute the score matrix using as negatives samples from different GPUs')
 
     args = parser.parse_args()
 
@@ -87,7 +88,6 @@ def get_args():
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
-    assert not (args.hyp_cone_ruoshi and not args.hyp_cone), 'hyp_cone is requisite for hyp_cone_ruoshi'
 
     return args
 
@@ -116,21 +116,7 @@ def main():
     if args.local_rank <= 0:
         print_r(args, 'Preparing model')
 
-    model = models.Model(sample_size=args.img_dim,
-                         num_seq=args.num_seq,
-                         seq_len=args.seq_len,
-                         network_feature=args.network_feature,
-                         pred_step=args.pred_step,
-                         hyperbolic=args.hyperbolic,
-                         hyperbolic_version=args.hyperbolic_version,
-                         distance=args.distance,
-                         hyp_cone=args.hyp_cone,
-                         early_action=args.early_action,
-                         early_action_self=args.early_action_self,
-                         nclasses=args.n_classes,
-                         downstream=args.finetune,
-                         )
-
+    model = models.Model(args)
     model = model.to(args.device)
 
     params = model.parameters()

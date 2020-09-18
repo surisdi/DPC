@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from utils.augmentation import Image
 from tqdm import tqdm
+from collections import defaultdict 
 
 
 def pil_loader(path):
@@ -396,6 +397,28 @@ class Hollywood2(data.Dataset):
         if self.unit_test: self.video_info = self.video_info.sample(32, random_state=666)
         # shuffle not necessary because use RandomSampler
 
+        # Read action and index
+        self.dict_labels = {}
+        self.dict_labels_hier = {}
+        label_path = '/proj/vondrick/datasets/Hollywood2/class_Ind'
+        with open(os.path.join(label_path, 'class_Ind.txt'), 'r') as f:
+            for line in f:
+                action, label = line.split()
+                self.dict_labels[action] = label
+                
+        with open(os.path.join(label_path, 'class_Ind_Hier.txt'), 'r') as f:
+            for line in f:
+                action, label = line.split()
+                self.dict_labels_hier[action] = label
+                
+        self.child_nodes = defaultdict(list)
+        self.parent_nodes = defaultdict(list)
+        with open(os.path.join(label_path, 'class_Relation.txt'), 'r') as f:
+            for line in f:
+                parent, child = line.split()
+                self.child_nodes[parent].append(child)
+                self.parent_nodes[child].append(parent)
+                
         # Get labels
         self.labels = {}
         with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
@@ -406,16 +429,7 @@ class Hollywood2(data.Dataset):
                 key = key.split('/')[-1].split('.')[0]
                 self.labels[key] = label
 
-        # Read action and index
-        self.dict_labels = {}
-        self.dict_labels_hier = {}
-        label_path = '/proj/vondrick/datasets/Hollywood2/class_Ind'
-        with open(os.path.join(label_path, 'class_Ind.txt'), 'r') as f:
-            for line in f:
-                action, label = line.split()
-                self.dict_labels[action] = label
-        
-                    
+                
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]

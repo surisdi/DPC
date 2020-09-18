@@ -113,7 +113,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
             manif = geoopt.manifolds.PoincareBall(c=1)
 
             # score = manif.dist(pred_expand, gt_expand)
-            score = manif.dist(pred_expand.half(), gt_expand.half())
+            score = manif.dist(pred_expand.float(), gt_expand.float())
             if args.distance == 'squared':
                 score = score.pow(2)
             elif args.distance == 'cosh':

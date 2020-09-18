@@ -141,7 +141,8 @@ class Kinetics600_full_3d(data.Dataset):
                  downsample=3,
                  epsilon=5,
                  unit_test=False,
-                 big=False):
+                 big=False,
+                 return_label=False):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
@@ -149,6 +150,7 @@ class Kinetics600_full_3d(data.Dataset):
         self.downsample = downsample
         self.epsilon = epsilon
         self.unit_test = unit_test
+        self.return_label = return_label
 
         if big:
             print('Using Kinetics600 full data (256x256)')
@@ -158,19 +160,19 @@ class Kinetics600_full_3d(data.Dataset):
         # splits
         if big:
             if mode == 'train':
-                split = 'process_data/data/kinetics600/train_split.csv'
+                split = 'process_data/k600/train_split_ssd.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/data/kinetics600/val_split.csv'
+                split = 'process_data/k600/val_split_ssd.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
         else:  # small
             if mode == 'train':
-                split = 'process_data/data/kinetics600/train_split.csv'
+                split = 'process_data/k600/train_split_ssd.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/data/kinetics600/val_split.csv'
+                split = 'process_data/k600/val_split_ssd.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
@@ -224,6 +226,8 @@ class Kinetics600_full_3d(data.Dataset):
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
         b = time.time()
+        if self.return_label:
+            return t_seq, 0 # placeholder, need implement
         return t_seq
 
     def __len__(self):
@@ -251,10 +255,10 @@ class UCF101_3d(data.Dataset):
 
         # splits
         if mode == 'train':
-            split = '/proj/vondrick/lovish/data/ucf101/train_split%02d_split_hdd.csv' % self.which_split
+            split = '/home/rl3111/github/others/DPC/process_data/ucf101/train_split%02d_split_hdd.csv' % self.which_split
             video_info = pd.read_csv(split, header=None)
         elif (mode == 'val') or (mode == 'test'): # use val for test
-            split = '/proj/vondrick/lovish/data/ucf101/test_split%02d_split_hdd.csv' % self.which_split 
+            split = '/home/rl3111/github/others/DPC/process_data/ucf101/test_split%02d_split_hdd.csv' % self.which_split 
             video_info = pd.read_csv(split, header=None)
         else: raise ValueError('wrong mode')
 
@@ -357,24 +361,24 @@ class Hollywood2(data.Dataset):
         # splits
         if big:
             if mode == 'train':
-                split = 'process_data/data/hollywood2/train_split.csv'
+                split = '/proj/vondrick/datasets/Hollywood2/processed_data/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/data/hollywood2/test_split.csv'
+                split = '/proj/vondrick/datasets/Hollywood2/processed_data/test_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
         else:  # small
             if mode == 'train':
-                split = 'process_data/data/hollywood2/train_split.csv'
+                split = '/proj/vondrick/datasets/Hollywood2/processed_data/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/data/hollywood2/test_split.csv'
+                split = '/proj/vondrick/datasets/Hollywood2/processed_data/test_split.csv'
                 video_info = pd.read_csv(split, header=None)
             else:
                 raise ValueError('wrong mode')
 
-        path_drop_idx = f'process_data/data/drop_idx_hollywood_{mode}.pth'
+        path_drop_idx = f'/proj/vondrick/datasets/Hollywood2/processed_data/drop_idx_hollywood_{mode}.pth'
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:
@@ -394,7 +398,6 @@ class Hollywood2(data.Dataset):
 
         # Get labels
         self.labels = {}
-        self.dict_labels = {}
         with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
             for line in f:
                 key, label, *_ = line.split()
@@ -402,9 +405,17 @@ class Hollywood2(data.Dataset):
                     continue
                 key = key.split('/')[-1].split('.')[0]
                 self.labels[key] = label
-                if label not in self.dict_labels:
-                    self.dict_labels[label] = len(self.dict_labels)
 
+        # Read action and index
+        self.dict_labels = {}
+        self.dict_labels_hier = {}
+        label_path = '/proj/vondrick/datasets/Hollywood2/class_Ind'
+        with open(os.path.join(label_path, 'class_Ind.txt'), 'r') as f:
+            for line in f:
+                action, label = line.split()
+                self.dict_labels[action] = label
+        
+                    
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]

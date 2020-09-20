@@ -186,7 +186,7 @@ def main():
     if args.local_rank <= 0:
         print('Preparing trainer')
     trainer = Trainer(args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
-                      img_path, model_path, scheduler)
+                      img_path, model_path, scheduler, partial=0.1)
     trainer.train()
 
 
@@ -222,7 +222,8 @@ def get_data(args, mode='train', return_label=False):
                                                seq_len=args.seq_len,
                                                num_seq=args.num_seq,
                                                downsample=5,
-                                               big=use_big_K600)
+                                               big=use_big_K600,
+                                               return_label=return_label)
     elif args.dataset == 'ucf101':
         dataset = datasets.UCF101_3d(mode=mode,
                                      transform=transform,

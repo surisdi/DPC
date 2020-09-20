@@ -29,19 +29,13 @@ class Trainer:
     def train(self):
         # --- main loop --- #
         for epoch in range(self.args.start_epoch, self.args.epochs):
-            accuracy_train_list = self.run_epoch(epoch, train=True)
-            accuracy_val_list = self.run_epoch(epoch, train=False)
+            self.run_epoch(epoch, train=True)
+            accuracy_val = self.run_epoch(epoch, train=False)
 
             if self.args.local_rank <= 0 and not self.args.debug:
-
-                self.writers['train'].add_scalar('global/loss', accuracy_train_list['losses'], epoch)
-                self.writers['val'].add_scalar('global/loss', accuracy_val_list['losses'], epoch)
-                self.writers['train'].add_scalars('accuracy', accuracy_train_list, epoch)
-                self.writers['val'].add_scalars('accuracy', accuracy_val_list, epoch)
-
                 # save checkpoint
-                is_best = accuracy_val_list['accuracy'] > self.best_acc
-                self.best_acc = max(accuracy_val_list['accuracy'], self.best_acc)
+                is_best = accuracy_val > self.best_acc
+                self.best_acc = max(accuracy_val, self.best_acc)
                 save_checkpoint({'epoch': epoch + 1,
                                  'net': self.args.network_feature,
                                  'state_dict': (self.model.module if hasattr(self.model, 'module') else
@@ -128,13 +122,16 @@ class Trainer:
                                             (1 if 'Parallel' in str(type(self.model)) else self.args.step_n_gpus)
                         self.writers['train'].add_scalars('train', {**postfix_kwargs}, num_outer_samples)
 
+            accuracy_list = {k: v.local_avg for k, v in avg_meters.items() if v.count > 0}
+
             if not train and self.args.local_rank <= 0:
                 print(f'[{epoch}/{self.args.epochs}]' +
                       ''.join([f'{k}: {v.local_avg:.04f}, ' for k, v in avg_meters.items() if v.count > 0]))
+                if not self.args.debug:
+                    self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
+                    self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)
 
-            accuracy_list = {k: v.local_avg for k, v in avg_meters.items() if v.count > 0}
-
-            return accuracy_list
+            return accuracy_list['accuracy']
 
 
 def gather_tensor(v):

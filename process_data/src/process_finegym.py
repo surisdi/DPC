@@ -40,17 +40,20 @@ def process_video(inputs):
             for segment_id, segment_data in event_data['segments'].items():
                 name_subclip = video_id + '_' + event_id + '_' + segment_id
                 path_subclip = os.path.join(folder_dataset, 'action_videos', f'{name_subclip}.mp4')
-                paths_original.append(path_clip)
-                paths_new.append(path_subclip)
-                timestamps.append(segment_data['timestamps'][0])
+                if len(segment_data['timestamps']) > 1:  # this is only to extract the clips with more than 1 stage that were extracted incorrectly before
+                    paths_original.append(path_clip)
+                    paths_new.append(path_subclip)
+                    ts = segment_data['timestamps']
+                    timestamps.append([ts[0][0], ts[len(ts)-1][1]])
 
     extract_video(paths_original, paths_new, timestamps)
 
 
 def extract_video(paths_original, paths_new, timestamps):
     for path_original, path_new, timestamp in zip(paths_original, paths_new, timestamps):
-        if os.path.isfile(path_original) and not os.path.isfile(path_new):
-            instruction = f'ffmpeg -i {path_original} -ss {timestamp[0]} -to {timestamp[1]} -c:v libx264 -c:a copy {path_new}'
+        if os.path.isfile(path_original):  # and not os.path.isfile(path_new):
+            # -y overwrites
+            instruction = f'ffmpeg -y -i {path_original} -ss {timestamp[0]} -to {timestamp[1]} -c:v libx264 -c:a copy {path_new}'
             subprocess.call(instruction, shell=True)
 
 

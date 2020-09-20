@@ -27,7 +27,7 @@ class Model(nn.Module):
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
         self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=False)
-        self.param['num_layers'] = 1 # param for GRU
+        self.param['num_layers'] = 1  # param for GRU
         self.param['hidden_size'] = self.param['feature_size'] # param for GRU
         """
         When using a ConvGRU with a 1x1 convolution, it is equivalent to using a regular GRU by flattening the H and W 
@@ -36,13 +36,24 @@ class Model(nn.Module):
         So we can use the hyperbolic GRU.
         """
         if args.hyperbolic:
+            # Not used because the hyperbolic layer actually already works in Euclidean space as input
+            # Layer to adapt from Euclidean to a value of Euclidean smaller than the one coming from the ResNet (at
+            # least after initialization). Modifying the initializaton of the ResNet is hard because of the batchnorms
+            # and the residual connections. And making the output after the network always small (by dividing by a fix
+            # number is not ideal because the network cannot learn to calibrate).
+            # self.adapt_layer = nn.Linear(self.param['feature_size'], self.param['feature_size'])
+            # self._initialize_weights(self.adapt_layer, gain=0.01)
+
             self.hyperbolic_linear = MobiusLinear(self.param['feature_size'], self.param['feature_size'],
                                                   # This computes an exmap0 after the operation, where the linear
                                                   # operation operates in the Euclidean space.
                                                   hyperbolic_input=False,
                                                   hyperbolic_bias=True,
                                                   nonlin=None,  # For now
-                                                  ).double()
+                                                  fp64_hyper=args.fp64_hyper
+                                                  )
+            if args.fp64_hyper:
+                self.hyperbolic_linear = self.hyperbolic_linear.double()
 
         self.agg = ConvGRU(input_size=self.param['feature_size'],
                            hidden_size=self.param['hidden_size'],
@@ -84,7 +95,8 @@ class Model(nn.Module):
             feature_reshape = feature.permute(0, 2, 3, 4, 1)
             mid_feature_shape = feature_reshape.shape
             feature_reshape = feature_reshape.reshape(-1, feature.shape[1])
-            feature_dist = self.hyperbolic_linear(feature_reshape)
+            # feature_adapt = self.adapt_layer(feature_reshape)
+            feature_dist = self.hyperbolic_linear(feature_reshape)  # performs exmap0
             # feature_dist = gmath.expmap0(feature_reshape, k=torch.tensor(-1.))
             feature_dist = feature_dist.reshape(mid_feature_shape).permute(0, 4, 1, 2, 3)
 
@@ -119,7 +131,9 @@ class Model(nn.Module):
             # Predict label supervisedly
             if self.args.hyperbolic:
                 feature_shape = pooled_hidden.shape
-                pooled_hidden = pooled_hidden.view(-1, feature_shape[-1]).double()
+                pooled_hidden = pooled_hidden.view(-1, feature_shape[-1])
+                if self.fp64_hyper:
+                    pooled_hidden = pooled_hidden.double()
                 pooled_hidden = self.hyperbolic_linear(pooled_hidden)
                 pooled_hidden = pooled_hidden.view(feature_shape)
             pred_classes = self.network_class(pooled_hidden)
@@ -164,13 +178,12 @@ class Model(nn.Module):
             loss, *results = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes, labels.shape[0])
             return loss, results
 
-
-    def _initialize_weights(self, module):
+    def _initialize_weights(self, module, gain=1.):
         for name, param in module.named_parameters():
             if 'bias' in name:
                 nn.init.constant_(param, 0.0)
             elif 'weight' in name:
-                nn.init.orthogonal_(param, 1)
+                nn.init.orthogonal_(param, gain)
         # other resnet weights have been initialized in resnet itself
 
     def reset_mask(self):

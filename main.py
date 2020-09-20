@@ -76,6 +76,9 @@ def get_args():
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
     parser.add_argument('--fp16', action='store_true', help='Whether to use 16-bit float precision instead of 32-bit. '
                                                             'Only affects the Euclidean layers')
+    parser.add_argument('--fp64_hyper', action='store_true', help='Whether to use 64-bit float precision instead of '
+                                                                  '32-bit for the hyperbolic layers and operations,'
+                                                                  'Can be combined with --fp16')
     parser.add_argument('--cross_gpu_score', action='store_true',
                         help='Compute the score matrix using as negatives samples from different GPUs')
 

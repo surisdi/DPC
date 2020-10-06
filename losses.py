@@ -41,6 +41,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
             loss_neg = neg.sum() / score.shape[0]
             loss = loss_pos + loss_neg
 
+            # TODO check this
             [A, B] = score.shape
             score = score[:B, :]
             pos = score.diagonal(dim1=-2, dim2=-1)
@@ -82,7 +83,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
         if args.hyp_cone:
 
-            dist_fn = HypConeDist(K=0.1)
+            dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
             score = dist_fn(pred_expand.float(), gt_expand.float())
 
             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)

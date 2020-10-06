@@ -5,16 +5,20 @@ import collections
 import numpy as np
 from PIL import ImageOps, Image
 from joblib import Parallel, delayed
+from torchvision.transforms import _transforms_video as transforms_video
 
 import torchvision
 from torchvision import transforms
 import torchvision.transforms.functional as F
+import torch
 
 class Padding:
     def __init__(self, pad):
         self.pad = pad
 
     def __call__(self, img):
+        if type(img) == torch.Tensor:
+            raise NotImplemented
         return ImageOps.expand(img, border=self.pad, fill=0)
 
 class Scale:
@@ -24,6 +28,23 @@ class Scale:
         self.interpolation = interpolation
 
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            if isinstance(self.size, int):
+                t, w, h, c = imgmap.shape
+                if (w <= h and w == self.size) or (h <= w and h == self.size):
+                    return imgmap
+                if w < h:
+                    ow = self.size
+                    oh = int(self.size * h / w)
+                    size = (ow, oh)
+                else:
+                    oh = self.size
+                    ow = int(self.size * w / h)
+                    size = (ow, oh)
+            else:
+                size = self.size
+            imgmap = torch.nn.functional.interpolate(imgmap, size)
+            return imgmap
         # assert len(imgmap) > 1 # list of images
         img1 = imgmap[0]
         if isinstance(self.size, int):
@@ -49,7 +70,11 @@ class CenterCrop:
         else:
             self.size = size
 
+        self.operation_torch = transforms_video.CenterCropVideo(size)
+
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            return self.operation_torch(imgmap)
         img1 = imgmap[0]
         w, h = img1.size
         th, tw = self.size
@@ -68,6 +93,8 @@ class RandomCropWithProb:
         self.threshold = p
 
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            raise NotImplemented
         img1 = imgmap[0]
         w, h = img1.size
         if self.size is not None:
@@ -104,7 +131,12 @@ class RandomCrop:
             self.size = size
         self.consistent = consistent
 
+        self.operation_torch = transforms_video.RandomCropVideo(size)
+
     def __call__(self, imgmap, flowmap=None):
+        if type(imgmap) == torch.Tensor:
+            assert self.consistent, "For Torch tensors the option of not making it consistent is not implemented"
+            return self.operation_torch(imgmap)
         img1 = imgmap[0]
         w, h = img1.size
         if self.size is not None:
@@ -142,13 +174,18 @@ class RandomCrop:
 
 
 class RandomSizedCrop:
-    def __init__(self, size, interpolation=Image.BILINEAR, consistent=True, p=1.0):
+    def __init__(self, size, interpolation="bilinear", consistent=True, p=1.0):
         self.size = size
-        self.interpolation = interpolation
+        self.interpolation = Image.BILINEAR if interpolation == "bilinear" else None
         self.consistent = consistent
-        self.threshold = p 
+        self.threshold = p
+
+        self.operation_torch = transforms_video.RandomResizedCropVideo(size, interpolation_mode=interpolation)
 
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            assert self.consistent, "For Torch tensors the option of not making it consistent is not implemented"
+            return self.operation_torch(imgmap)
         img1 = imgmap[0]
         if random.random() < self.threshold: # do RandomSizedCrop
             for attempt in range(10):
@@ -204,7 +241,12 @@ class RandomHorizontalFlip:
             self.threshold = 1
         else:
             self.threshold = 0.5
+        self.operation_torch = transforms_video.RandomHorizontalFlipVideo(p=self.threshold)
+
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            assert self.consistent, "For Torch tensors the option of not making it consistent is not implemented"
+            return self.operation_torch(imgmap)
         if self.consistent:
             if random.random() < self.threshold:
                 return [i.transpose(Image.FLIP_LEFT_RIGHT) for i in imgmap]
@@ -225,8 +267,20 @@ class RandomGray:
     '''Actually it is a channel splitting, not strictly grayscale images'''
     def __init__(self, consistent=True, p=0.5):
         self.consistent = consistent
-        self.p = p # probability to apply grayscale
+        self.p = p  # probability to apply grayscale
+
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            if random.random() < self.p or not self.consistent:
+                imgmap_gray = self.grayscale_torch(imgmap)
+                if self.consistent:
+                    return imgmap_gray
+                else:
+                    do_grey = (torch.rand(imgmap.shape[1]) < self.p).float()[None, :, None, None]
+                    imgmap = imgmap_gray * do_grey + imgmap * (1 - do_grey)
+                    return imgmap
+            else:
+                return imgmap
         if self.consistent:
             if random.random() < self.p:
                 return [self.grayscale(i) for i in imgmap]
@@ -247,9 +301,15 @@ class RandomGray:
         np_img = np.array(img)[:,:,channel]
         np_img = np.dstack([np_img, np_img, np_img])
         img = Image.fromarray(np_img, 'RGB')
-        return img 
+        return img
 
+    def grayscale_torch(self, img):
+        channel = np.random.choice(3)
+        img = img[channel]
+        img = img.unsqueeze(0).expand((3, img.shape[0], img.shape[1], img.shape[2]))
+        return img
 
+# TODO
 class ColorJitter(object):
     """Randomly change the brightness, contrast and saturation of an image. --modified from pytorch source code
     Args:
@@ -326,6 +386,9 @@ class ColorJitter(object):
         return transform
 
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            return imgmap  # TODO?
+            # raise NotImplemented
         if random.random() < self.threshold: # do ColorJitter
             if self.consistent:
                 transform = self.get_params(self.brightness, self.contrast,
@@ -349,13 +412,14 @@ class ColorJitter(object):
         format_string += ', hue={0})'.format(self.hue)
         return format_string
 
-
 class RandomRotation:
     def __init__(self, consistent=True, degree=15, p=1.0):
         self.consistent = consistent
         self.degree = degree 
         self.threshold = p
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            raise NotImplemented
         if random.random() < self.threshold: # do RandomRotation
             if self.consistent:
                 deg = np.random.randint(-self.degree, self.degree, 1)[0]
@@ -367,6 +431,8 @@ class RandomRotation:
 
 class ToTensor:
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            return imgmap
         totensor = transforms.ToTensor()
         return [totensor(i) for i in imgmap]
 
@@ -374,7 +440,11 @@ class Normalize:
     def __init__(self, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
         self.mean = mean
         self.std = std
+        self.operation_torch = transforms_video.NormalizeVideo(mean, std)
+
     def __call__(self, imgmap):
+        if type(imgmap) == torch.Tensor:
+            return self.operation_torch(imgmap)
         normalize = transforms.Normalize(mean=self.mean, std=self.std)
         return [normalize(i) for i in imgmap]
 

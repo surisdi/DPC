@@ -5,8 +5,13 @@ import time
 import pandas as pd
 import numpy as np
 from utils.augmentation import Image
+from collections import defaultdict
+import json
+import random
+import torchvision
+from torchvision import datasets, transforms
 from tqdm import tqdm
-from collections import defaultdict 
+from utils import augmentation
 
 
 def pil_loader(path):
@@ -39,8 +44,10 @@ class Kinetics400_full_3d(data.Dataset):
         self.unit_test = unit_test
         self.return_label = return_label
 
-        if big: print('Using Kinetics400 full data (256x256)')
-        else: print('Using Kinetics400 full data (150x150)')
+        if big:
+            print('Using Kinetics400 full data (256x256)')
+        else:
+            print('Using Kinetics400 full data (150x150)')
 
         # get action list
         self.action_dict_encode = {}
@@ -49,7 +56,7 @@ class Kinetics400_full_3d(data.Dataset):
         action_df = pd.read_csv(action_file, sep=',', header=None)
         for _, row in action_df.iterrows():
             act_id, act_name = row
-            act_id = int(act_id) - 1 # let id start from 0
+            act_id = int(act_id) - 1  # let id start from 0
             self.action_dict_decode[act_id] = act_name
             self.action_dict_encode[act_name] = act_id
 
@@ -61,22 +68,24 @@ class Kinetics400_full_3d(data.Dataset):
             elif (mode == 'val') or (mode == 'test'):
                 split = 'process_data/data/kinetics400_256/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
-            else: raise ValueError('wrong mode')
-        else: # small
+            else:
+                raise ValueError('wrong mode')
+        else:  # small
             if mode == 'train':
                 split = 'process_data/data/kinetics400/train_split.csv'
                 video_info = pd.read_csv(split, header=None)
             elif (mode == 'val') or (mode == 'test'):
                 split = 'process_data/data/kinetics400/val_split.csv'
                 video_info = pd.read_csv(split, header=None)
-            else: raise ValueError('wrong mode')
+            else:
+                raise ValueError('wrong mode')
 
         drop_idx = []
         print('filter out too short videos ...')
         for idx, row in tqdm(video_info.iterrows(), total=len(video_info)):
             vpath, vlen = row
-            if vlen-self.num_seq*self.seq_len*self.downsample <= 0:
-                drop_idx.append(idx) 
+            if vlen - self.num_seq * self.seq_len * self.downsample <= 0:
+                drop_idx.append(idx)
         self.video_info = video_info.drop(drop_idx, axis=0)
 
         if mode == 'val': self.video_info = self.video_info.sample(frac=0.3, random_state=666)
@@ -85,28 +94,28 @@ class Kinetics400_full_3d(data.Dataset):
 
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
-        if vlen-self.num_seq*self.seq_len*self.downsample <= 0: return [None]
+        if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
         n = 1
-        start_idx = np.random.choice(range(vlen-self.num_seq*self.seq_len*self.downsample), n)
-        seq_idx = np.expand_dims(np.arange(self.num_seq), -1)*self.downsample*self.seq_len + start_idx
-        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len),0)*self.downsample
+        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample), n)
+        seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
+        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
         items = self.idx_sampler(vlen, vpath)
-        if items is None: print(vpath) 
-        
+        if items is None: print(vpath)
+
         idx_block, vpath = items
         assert idx_block.shape == (self.num_seq, self.seq_len)
-        idx_block = idx_block.reshape(self.num_seq*self.seq_len)
-        
-        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i+1))) for i in idx_block]
-        t_seq = self.transform(seq) # apply same transform
-        
+        idx_block = idx_block.reshape(self.num_seq * self.seq_len)
+
+        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
+        t_seq = self.transform(seq)  # apply same transform
+
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
-        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1,2)
+        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
 
         if self.return_label:
             try:
@@ -228,7 +237,7 @@ class Kinetics600_full_3d(data.Dataset):
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
         b = time.time()
         if self.return_label:
-            return t_seq, 0 # placeholder, need implement
+            return t_seq, 0  # placeholder, need implement
         return t_seq
 
     def __len__(self):
@@ -238,9 +247,9 @@ class Kinetics600_full_3d(data.Dataset):
 class UCF101_3d(data.Dataset):
     def __init__(self,
                  mode='train',
-                 transform=None, 
+                 transform=None,
                  seq_len=10,
-                 num_seq = 5,
+                 num_seq=5,
                  downsample=3,
                  epsilon=5,
                  which_split=1,
@@ -258,10 +267,11 @@ class UCF101_3d(data.Dataset):
         if mode == 'train':
             split = '/home/rl3111/github/others/DPC/process_data/ucf101/train_split%02d_split_hdd.csv' % self.which_split
             video_info = pd.read_csv(split, header=None)
-        elif (mode == 'val') or (mode == 'test'): # use val for test
-            split = '/home/rl3111/github/others/DPC/process_data/ucf101/test_split%02d_split_hdd.csv' % self.which_split 
+        elif (mode == 'val') or (mode == 'test'):  # use val for test
+            split = '/home/rl3111/github/others/DPC/process_data/ucf101/test_split%02d_split_hdd.csv' % self.which_split
             video_info = pd.read_csv(split, header=None)
-        else: raise ValueError('wrong mode')
+        else:
+            raise ValueError('wrong mode')
 
         # get action list
         self.action_dict_encode = {}
@@ -277,7 +287,7 @@ class UCF101_3d(data.Dataset):
         drop_idx = []
         for idx, row in video_info.iterrows():
             vpath, vlen = row
-            if vlen-self.num_seq*self.seq_len*self.downsample <= 0:
+            if vlen - self.num_seq * self.seq_len * self.downsample <= 0:
                 drop_idx.append(idx)
         self.video_info = video_info.drop(drop_idx, axis=0)
 
@@ -286,29 +296,28 @@ class UCF101_3d(data.Dataset):
 
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
-        if vlen-self.num_seq*self.seq_len*self.downsample <= 0: return [None]
+        if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
         n = 1
-        start_idx = np.random.choice(range(vlen-self.num_seq*self.seq_len*self.downsample), n)
-        seq_idx = np.expand_dims(np.arange(self.num_seq), -1)*self.downsample*self.seq_len + start_idx
-        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len),0)*self.downsample
+        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample), n)
+        seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
+        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
-
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
         items = self.idx_sampler(vlen, vpath)
-        if items is None: print(vpath) 
-        
+        if items is None: print(vpath)
+
         idx_block, vpath = items
         assert idx_block.shape == (self.num_seq, self.seq_len)
-        idx_block = idx_block.reshape(self.num_seq*self.seq_len)
-        
-        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i+1))) for i in idx_block]
-        t_seq = self.transform(seq) # apply same transform
-        
+        idx_block = idx_block.reshape(self.num_seq * self.seq_len)
+
+        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
+        t_seq = self.transform(seq)  # apply same transform
+
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
-        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1,2)
+        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
 
         if self.return_label:
             try:
@@ -319,7 +328,7 @@ class UCF101_3d(data.Dataset):
                 vid = self.encode_action(vname)
             label = torch.LongTensor([vid])
             return t_seq, label
-            
+
         return t_seq
 
     def __len__(self):
@@ -413,7 +422,6 @@ class Hollywood2(data.Dataset):
                 action, label, _ = line.split()
                 self.dict_labels_hier[action] = label
         
-        # Hierarchical information
         self.child_nodes = defaultdict(list)
         self.parent_nodes = defaultdict(list)
         with open(os.path.join(label_path, 'class_Relation.txt'), 'r') as f:
@@ -427,7 +435,6 @@ class Hollywood2(data.Dataset):
             for line in f:
                 action, label, level = line.split()
                 self.hierarchy[level].append(action)
-            
         # Get labels
         self.labels = {}
         with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
@@ -438,7 +445,6 @@ class Hollywood2(data.Dataset):
                 key = key.split('/')[-1].split('.')[0]
                 self.labels[key] = label
 
-                
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
@@ -478,6 +484,212 @@ class Hollywood2(data.Dataset):
             return t_seq, torch.cat(labels)
         return t_seq, torch.tensor(-1)
 
-
     def __len__(self):
         return len(self.video_info)
+
+
+class FineGym(data.Dataset):
+    def __init__(self,
+                 mode='train',
+                 path_dataset='/proj/vondrick/datasets/FineGym/',
+                 transform=None,
+                 seq_len=10,  # given duration distribution, we should aim for ~1.5 seconds (around 7-8 frames at 5 fps)
+                 num_seq=5,
+                 downsample=3,
+                 epsilon=5,
+                 unit_test=False,
+                 return_label=False,
+                 gym288=True,
+                 use_stages=True,
+                 fps=5):
+        self.path_dataset = path_dataset
+        self.mode = mode
+        self.transform = transform
+        self.seq_len = seq_len
+        self.num_seq = num_seq
+        self.downsample = downsample
+        self.epsilon = epsilon
+        self.unit_test = unit_test
+        self.return_label = return_label
+        self.fps = fps
+
+        if mode in ['train', 'val']:
+            path_labels = 'gym288_train_element_v1.1.txt' if gym288 else 'gym99_train_element_v1.1.txt'
+        elif mode == 'test':
+            path_labels = 'gym288_val_element.txt' if gym288 else 'gym99_val_element.txt'
+        else:
+            raise ValueError('wrong mode')
+        path_labels = 'annotations/' + path_labels
+
+        with open(os.path.join(path_dataset, 'annotations/finegym_annotation_info_v1.1.json'), 'r') as f:
+            self.annotations = json.load(f)
+
+        clips = []
+        for root, dirs, files in os.walk(os.path.join(path_dataset, 'event_videos')):
+            # We look at this folder instead of self.annotations because not all videos are downloaded for now
+            for file in files:
+                clips.append(file.replace('.mp4', ''))
+
+        self.subclipidx2label = {}
+        clips_in_labels = []  # Some clips in "clips" may belong to another split or not even be in the *element.txt
+        with open(os.path.join(path_dataset, path_labels), 'r') as f:
+            for line in f:
+                data_split = line.replace('\n', '').split()
+                subclip_name = data_split[0]
+                self.subclipidx2label[subclip_name] = int(data_split[1])
+                clip_name = subclip_name[:27]
+                clips_in_labels.append(clip_name)
+
+        self.clips = {}  # Actual clips used in the dataset, with its actions
+        for clip in clips:
+            if clip not in clips_in_labels:
+                continue
+            assert len(clip) == 27  # youtube ID is 11, event ID is 15, and the separation
+            video_id = clip[:11]
+            event_id = clip[12:]
+            segments = self.annotations[video_id][event_id]['segments']
+            if segments is not None and len(segments) >= self.num_seq:
+                self.clips[clip] = segments
+
+        if mode in ['train', 'val']:
+            labels_val = random.Random(500).sample(range(len(self.clips)), int(0.2 * len(self.clips)))
+            if mode == 'val':  # take only 20% of the labels of the "train" split
+                self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_val}
+            else:  # mode == 'train':  # take the other 80% of the "train" split
+                labels_train = list(set(range(len(self.clips))) - set(labels_val))
+                self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_train}
+        self.idx2clipidx = {i: clipidx for i, clipidx in enumerate(self.clips.keys())}
+
+        if use_stages:
+            pass
+
+    def read_video(self, clipidx, segments):
+        # Sample self.num_seq consecutive actions from this segment
+        start = random.randint(0, len(segments) - self.num_seq)
+        actions = list(segments.keys())
+        total_clip = []
+        labels = []
+        for i in range(start, start + self.num_seq):
+            subclipidx = clipidx + '_' + actions[i]
+            path_clip = os.path.join(self.path_dataset, 'action_videos', f'{subclipidx}.mp4')
+            if os.path.isfile(path_clip):
+                video, audio, info = torchvision.io.read_video(path_clip, start_pts=0, end_pts=None, pts_unit='sec')
+                video = video.float()
+                # Adapt to fps
+                step = int(np.round(info['video_fps'] / self.fps))
+                video_resampled = video[range(0, video.shape[0], step)]
+                # If the video is too long, trim (random position)
+                start_subclip = random.randint(0, np.maximum(0, len(video_resampled) - self.seq_len))
+                video_trimmed = video_resampled[start_subclip:start_subclip + self.seq_len]
+                # [C T H W] is the format for the torchvision._transforms_video
+                video_resampled = video_trimmed.permute(3, 0, 1, 2)
+                # We transform at the subclip level. No need to have transformation consistency between clips
+                video_transformed = self.transform(video_resampled)  # apply same transform
+                # Zero-pad short clips
+                padding = [0, ] * 8
+                padding[5] = self.seq_len - video_transformed.shape[1]
+                video_padded = torch.nn.functional.pad(video_transformed, pad=padding, mode="constant", value=0)
+            else:
+                print(f'{path_clip} is not a valid file')
+                video_padded = torch.zeros((3, self.seq_len, 80, 80))
+            total_clip.append(video_padded)
+
+            if subclipidx not in self.subclipidx2label:
+                # This happens when the specific case when the action is not part of the action classes (for example
+                # when it is very specific and we are working with gym99). In this case we still load the action because
+                # if we skip it the temporal prediction does not make sense.
+                labels.append(-1)
+            else:
+                labels.append(self.subclipidx2label[subclipidx])
+
+        total_clip = torch.stack(total_clip)
+        labels = torch.tensor(labels)
+
+        return total_clip, labels
+
+    def __getitem__(self, index):
+        clipidx = self.idx2clipidx[index]
+        segments = self.clips[clipidx]
+        video, labels = self.read_video(clipidx, segments)
+        if not self.return_label:
+            labels = torch.tensor(-1)
+        return video, labels
+
+    def __len__(self):
+        return len(self.clips)
+
+
+def get_data(args, mode='train', return_label=False):
+    if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
+        transform = transforms.Compose([
+            augmentation.RandomHorizontalFlip(consistent=True),
+            augmentation.RandomCrop(size=224, consistent=True),
+            augmentation.Scale(size=(args.img_dim, args.img_dim)),
+            augmentation.RandomGray(consistent=False, p=0.5),
+            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+            augmentation.ToTensor(),
+            augmentation.Normalize()
+        ])
+    # designed for kinetics400, short size=150, rand crop to 128x128
+    else:  # TODO think augmentation for hollywood2 and finegym
+        transform = transforms.Compose([
+            augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
+            augmentation.RandomHorizontalFlip(consistent=True),
+            augmentation.RandomGray(consistent=False, p=0.5),
+            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+            augmentation.ToTensor(),
+            augmentation.Normalize()
+        ])
+
+    if args.dataset == 'k600':
+        use_big_K600 = args.img_dim > 140
+        dataset = Kinetics600_full_3d(mode=mode,
+                                      transform=transform,
+                                      seq_len=args.seq_len,
+                                      num_seq=args.num_seq,
+                                      downsample=5,
+                                      big=use_big_K600,
+                                      return_label=return_label)
+    elif args.dataset == 'ucf101':
+        dataset = UCF101_3d(mode=mode,
+                            transform=transform,
+                            seq_len=args.seq_len,
+                            num_seq=args.num_seq,
+                            downsample=args.ds,
+                            return_label=return_label)
+    elif args.dataset == 'hollywood2':
+        dataset = Hollywood2(mode=mode,
+                             transform=transform,
+                             seq_len=args.seq_len,
+                             num_seq=args.num_seq,
+                             downsample=args.ds,
+                             return_label=return_label)
+    elif args.dataset == 'finegym':
+        dataset = FineGym(mode=mode,
+                          transform=transform,
+                          seq_len=args.seq_len,
+                          num_seq=args.num_seq,
+                          downsample=args.ds,
+                          return_label=return_label)
+    else:
+        raise ValueError('dataset not supported')
+
+    sampler = data.RandomSampler(dataset)
+
+    if mode == 'train':
+        data_loader = data.DataLoader(dataset,
+                                      batch_size=args.batch_size,
+                                      sampler=sampler,
+                                      shuffle=False,
+                                      num_workers=0,
+                                      pin_memory=True,
+                                      drop_last=True)
+    else:  # mode == 'val':
+        data_loader = data.DataLoader(dataset,
+                                      batch_size=args.batch_size,
+                                      sampler=sampler,
+                                      shuffle=False,
+                                      num_workers=32,
+                                      pin_memory=True,
+                                      drop_last=True)
+    return data_loader

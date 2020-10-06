@@ -9,6 +9,7 @@ import math
 import geoopt.manifolds.stereographic.math as gmath
 import geoopt
 from torch.cuda.amp import autocast
+import numpy as np
 
 
 def mobius_linear(
@@ -160,6 +161,7 @@ class MobiusLinear(torch.nn.Linear):
         hyperbolic_bias=True,
         nonlin=None,
         k=-1.0,
+        fp64_hyper=True,
         **kwargs
     ):
         k = torch.tensor(k)
@@ -169,16 +171,25 @@ class MobiusLinear(torch.nn.Linear):
                 self.ball = manifold = geoopt.PoincareBall(c=k.abs())
                 self.bias = geoopt.ManifoldParameter(self.bias, manifold=manifold)
                 with torch.no_grad():
-                    self.bias.set_(gmath.expmap0(self.bias.normal_() / 4, k=k))
+                    # self.bias.set_(gmath.expmap0(self.bias.normal_() / 4, k=k))
+                    self.bias.set_(gmath.expmap0(self.bias.normal_() / 400, k=k))
         with torch.no_grad():
-            self.weight.normal_(std=1e-2)
+            # 1e-2 was the original value in the code. The updated one is from HNN++
+            std = 1/np.sqrt(2*self.weight.shape[0]*self.weight.shape[1])
+            # Actually, we divide that by 100 so that it starts really small and far from the border
+            std = std/100
+            self.weight.normal_(std=std)
         self.hyperbolic_bias = hyperbolic_bias
         self.hyperbolic_input = hyperbolic_input
         self.nonlin = nonlin
         self.k = k
+        self.fp64_hyper = fp64_hyper
 
     def forward(self, input):
-        input = input.double()
+        if self.fp64_hyper:
+            input = input.double()
+        else:
+            input = input.float()
         with autocast(enabled=False):  # Do not use fp16
             return mobius_linear(
                 input,
@@ -215,7 +226,10 @@ class MobiusDist2Hyperplane(torch.nn.Module):
             self.tangent = geoopt.ManifoldParameter(tangent, manifold=sphere).proj_()
 
     def forward(self, input):
-        input = input.double()
+        if self.fp64_hyper:
+            input = input.double()
+        else:
+            input = input.float()
         with autocast(enabled=False):  # Do not use fp16
             input = input.unsqueeze(-2)
             distance = gmath.dist2plane(
@@ -305,7 +319,10 @@ class MobiusGRU(torch.nn.Module):
             torch.nn.init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input: torch.Tensor, h0=None):
-        input = input.double()
+        if self.fp64_hyper:
+            input = input.double()
+        else:
+            input = input.float()
         with autocast(enabled=False):  # Do not use fp16
             # input shape: seq_len, batch, input_size
             # hx shape: batch, hidden_size

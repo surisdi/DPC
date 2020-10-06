@@ -78,6 +78,9 @@ def get_args():
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
     parser.add_argument('--fp16', action='store_true', help='Whether to use 16-bit float precision instead of 32-bit. '
                                                             'Only affects the Euclidean layers')
+    parser.add_argument('--fp64_hyper', action='store_true', help='Whether to use 64-bit float precision instead of '
+                                                                  '32-bit for the hyperbolic layers and operations,'
+                                                                  'Can be combined with --fp16')
     parser.add_argument('--cross_gpu_score', action='store_true',
                         help='Compute the score matrix using as negatives samples from different GPUs')
 
@@ -176,8 +179,8 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = get_data(args, 'train', return_label=args.n_classes > 0)
-    val_loader = get_data(args, 'val', return_label=args.n_classes > 0)
+    train_loader = datasets.get_data(args, 'train', return_label=args.n_classes > 0)
+    val_loader = datasets.get_data(args, 'val', return_label=args.n_classes > 0)
 
     # setup tools
     img_path, model_path = set_path(args)
@@ -190,82 +193,7 @@ def main():
     trainer = Trainer(args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
                       img_path, model_path, scheduler, partial=0.1)
     trainer.train()
-
-
-def get_data(args, mode='train', return_label=False, hierarchical_label=False):
-    transform = None
-    if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
-        transform = transforms.Compose([
-            augmentation.RandomHorizontalFlip(consistent=True),
-            augmentation.RandomCrop(size=224, consistent=True),
-            augmentation.Scale(size=(args.img_dim, args.img_dim)),
-            augmentation.RandomGray(consistent=False, p=0.5),
-            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
-            augmentation.ToTensor(),
-            augmentation.Normalize()
-        ])
-    # designed for kinetics400, short size=150, rand crop to 128x128
-    elif args.dataset == 'k400' or args.dataset == 'k600' or args.dataset == 'hollywood2':  # TODO think augmentation for hollywood2
-        transform = transforms.Compose([
-            augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
-            augmentation.RandomHorizontalFlip(consistent=True),
-            augmentation.RandomGray(consistent=False, p=0.5),
-            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
-            augmentation.ToTensor(),
-            augmentation.Normalize()
-        ])
-
-    print_r(args, 'Loading data for "%s" ...' % mode)
-
-    if args.dataset == 'k600':
-        use_big_K600 = args.img_dim > 140
-        dataset = datasets.Kinetics600_full_3d(mode=mode,
-                                               transform=transform,
-                                               seq_len=args.seq_len,
-                                               num_seq=args.num_seq,
-                                               downsample=5,
-                                               big=use_big_K600,
-                                               return_label=return_label)
-    elif args.dataset == 'ucf101':
-        dataset = datasets.UCF101_3d(mode=mode,
-                                     transform=transform,
-                                     seq_len=args.seq_len,
-                                     num_seq=args.num_seq,
-                                     downsample=args.ds,
-                                     return_label=return_label)
-    elif args.dataset == 'hollywood2':
-        dataset = datasets.Hollywood2(mode=mode,
-                                      transform=transform,
-                                      seq_len=args.seq_len,
-                                      num_seq=args.num_seq,
-                                      downsample=args.ds,
-                                      return_label=return_label,
-                                      hierarchical_label=args.hierarchical)
-    else:
-        raise ValueError('dataset not supported')
-
-    sampler = data.RandomSampler(dataset)
-
-    if mode == 'train':
-        data_loader = data.DataLoader(dataset,
-                                      batch_size=args.batch_size,
-                                      sampler=sampler,
-                                      shuffle=False,
-                                      num_workers=32,
-                                      pin_memory=True,
-                                      drop_last=True)
-    else:  # mode == 'val':
-        data_loader = data.DataLoader(dataset,
-                                      batch_size=args.batch_size,
-                                      sampler=sampler,
-                                      shuffle=False,
-                                      num_workers=32,
-                                      pin_memory=True,
-                                      drop_last=True)
-    print_r(args, '"%s" dataset size: %d' % (mode, len(dataset)))
-    return data_loader
-
-
+    
 def set_path(args):
     if args.resume:
         exp_path = os.path.dirname(os.path.dirname(args.resume))

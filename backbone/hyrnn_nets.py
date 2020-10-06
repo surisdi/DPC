@@ -225,10 +225,10 @@ class MobiusDist2Hyperplane(torch.nn.Module):
 
     def extra_repr(self):
         return (
-            "in_features={in_features}, out_features={out_features}, "
-            "c={ball.c}".format(
-                **self.__dict__
-            )
+            "in_features={in_features}, out_features={out_features}"
+#             "c={ball.c}".format(
+#                 **self.__dict__
+#             )
         )
 
 

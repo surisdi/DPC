@@ -7,11 +7,30 @@ from utils.hyp_cone import HypConeDist
 def compute_loss(args, score, pred, labels, target, sizes, B):
 
     if args.finetune or (args.early_action and not args.early_action_self):
-        gt = labels.repeat_interleave(args.num_seq).to(args.device)
-        loss = torch.nn.functional.cross_entropy(pred, gt)
-        accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
-        results = accuracy, loss.item() / args.num_seq
-
+        if not args.hierarchical:
+            gt = labels.repeat_interleave(args.num_seq).to(args.device)
+            loss = torch.nn.functional.cross_entropy(pred, gt)
+            accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
+            
+        else:
+            if args.method == 1:
+                gt = torch.zeros(B, pred.size(1))
+                gt[torch.arange(gt.size(0)).unsqueeze(1), labels] = 1 # multi-label ground truth tensor
+                gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
+                labels = torch.repeat_interleave(labels, args.num_seq, dim=0).to(args.device)
+                print(labels)
+                print(gt)
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt) # CE loss with logit as ground truth
+                accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
+                hier_accuracy = 0
+                reward = 1
+                # reward value decay by 50% per level going up
+                for i in range(labels.size(1)):
+                    hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
+                    reward = reward / 2 
+            elif args.method == 2:
+                raise ValueError('method not implemented yet')
+        results = accuracy, hier_accuracy, loss.item() / args.num_seq
     else:
         if args.hyp_cone:
             score[score < 0] = 0
@@ -137,9 +156,10 @@ def compute_mask(args, sizes, B):
 
 def bookkeeping(args, avg_meters, results):
     if args.finetune or (args.early_action and not args.early_action_self):
-        accuracy, loss, B = results
+        accuracy, hier_accuracy, loss, B = results
         avg_meters['losses'].update(loss, B)
         avg_meters['accuracy'].update(accuracy, B)
+        avg_meters['hier_accuracy'].update(hier_accuracy, B)
     else:
         if args.hyp_cone:
             pos_acc, neg_acc, loss, B = results

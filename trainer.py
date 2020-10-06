@@ -63,7 +63,7 @@ class Trainer:
         else:
             self.model.eval()
 
-        avg_meters = {k: AverageMeter() for k in ['losses', 'accuracy', 'top1', 'top3', 'top5', 'pos_acc', 'neg_acc',
+        avg_meters = {k: AverageMeter() for k in ['losses', 'accuracy', 'hier_accuracy', 'top1', 'top3', 'top5', 'pos_acc', 'neg_acc',
                                                   'p_norm', 'g_norm', 'batch_time', 'data_time']}
 
         time_last = time.time()

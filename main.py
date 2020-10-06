@@ -49,6 +49,8 @@ def get_args():
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
     parser.add_argument('--finetune', action='store_true', help='Finetune model')
+    parser.add_argument('--hierarchical', action='store_true', help='evaluate with hierarchical labels')
+    parser.add_argument('--method', default=1, type=int, help='which method to use to evaluate')
 
     # Network
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
@@ -156,10 +158,13 @@ def main():
         else:
             print_r(args, f"=> no checkpoint found at '{args.finetune_path}'")
 
-        for name, param in model.module.named_parameters():
-            if name != 'network_class':
+        for name, param in model.named_parameters(): # deleted 'module'
+            if not 'network_class' in name:
                 param.requires_grad = False
-
+        print('\n==== parameter names and whether they require gradient ====\n')
+        for name, param in model.named_parameters():
+            print(name, param.requires_grad)
+        print('\n==== start dataloading ====\n')
     if args.local_rank != -1:
         from torch.nn.parallel import DistributedDataParallel as DDP
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
@@ -187,7 +192,7 @@ def main():
     trainer.train()
 
 
-def get_data(args, mode='train', return_label=False):
+def get_data(args, mode='train', return_label=False, hierarchical_label=False):
     transform = None
     if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
         transform = transforms.Compose([
@@ -234,7 +239,8 @@ def get_data(args, mode='train', return_label=False):
                                       seq_len=args.seq_len,
                                       num_seq=args.num_seq,
                                       downsample=args.ds,
-                                      return_label=return_label)
+                                      return_label=return_label,
+                                      hierarchical_label=args.hierarchical)
     else:
         raise ValueError('dataset not supported')
 

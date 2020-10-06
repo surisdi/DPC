@@ -344,7 +344,8 @@ class Hollywood2(data.Dataset):
                  epsilon=5,
                  unit_test=False,
                  big=False,
-                 return_label=False):
+                 return_label=False,
+                 hierarchical_label=False):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
@@ -353,6 +354,7 @@ class Hollywood2(data.Dataset):
         self.epsilon = epsilon
         self.unit_test = unit_test
         self.return_label = return_label
+        self.hierarchical_label = hierarchical_label
 
         # if big:
         #     print('Using Hollywood2 full data (256x256)')
@@ -408,9 +410,10 @@ class Hollywood2(data.Dataset):
                 
         with open(os.path.join(label_path, 'class_Ind_Hier.txt'), 'r') as f:
             for line in f:
-                action, label = line.split()
+                action, label, _ = line.split()
                 self.dict_labels_hier[action] = label
-                
+        
+        # Hierarchical information
         self.child_nodes = defaultdict(list)
         self.parent_nodes = defaultdict(list)
         with open(os.path.join(label_path, 'class_Relation.txt'), 'r') as f:
@@ -419,6 +422,12 @@ class Hollywood2(data.Dataset):
                 self.child_nodes[parent].append(child)
                 self.parent_nodes[child].append(parent)
                 
+        self.hierarchy = defaultdict(list)
+        with open(os.path.join(label_path, 'class_Ind_Hier.txt'), 'r') as f:
+            for line in f:
+                action, label, level = line.split()
+                self.hierarchy[level].append(action)
+            
         # Get labels
         self.labels = {}
         with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
@@ -434,14 +443,16 @@ class Hollywood2(data.Dataset):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
         n = 1
-        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample), n)
+        # image index starts from 1
+        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample + 1), n) 
         seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
         seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
-        label = self.dict_labels[self.labels[vpath.split('/')[-1]]]
+        action = self.labels[vpath.split('/')[-1]]
+        label = torch.LongTensor([int(self.dict_labels[action])])
         # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
@@ -455,8 +466,16 @@ class Hollywood2(data.Dataset):
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-        if self.return_label:
-            return t_seq, label
+        if self.return_label and not self.hierarchical_label:
+            return t_seq, label, action
+        if self.return_label and self.hierarchical_label:
+            labels = []
+            actions = []
+            while action != 'Root':
+                labels.append(torch.LongTensor([int(self.dict_labels_hier[action])]))
+                actions.append(action)
+                action = self.parent_nodes[action][0]
+            return t_seq, torch.cat(labels)
         return t_seq, torch.tensor(-1)
 
 

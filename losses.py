@@ -2,6 +2,7 @@ import torch
 import utils.utils as utils
 import geoopt
 from utils.hyp_cone import HypConeDist
+import copy
 
 
 def compute_loss(args, score, pred, labels, target, sizes, B):
@@ -18,8 +19,6 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
                 gt[torch.arange(gt.size(0)).unsqueeze(1), labels] = 1 # multi-label ground truth tensor
                 gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
                 labels = torch.repeat_interleave(labels, args.num_seq, dim=0).to(args.device)
-                print(labels)
-                print(gt)
                 loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt) # CE loss with logit as ground truth
                 accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
                 hier_accuracy = 0
@@ -39,6 +38,8 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
             neg.fill_diagonal_(0)
             loss_pos = pos.sum()
             loss_neg = neg.sum() / score.shape[0]
+#             print('pos_loss ', loss_pos.item())
+#             print('neg_loss ', loss_neg.item())
             loss = loss_pos + loss_neg
 
             # TODO check this
@@ -80,10 +81,17 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
         pred_expand = pred.unsqueeze(1).expand(shape_expand)
         gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
+#         print(pred_expand.shape)
+#         print(gt_expand.shape)
 
         if args.hyp_cone:
 
             dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
+            reshape_size = (pred.shape[0] * feature_dist.shape[0], pred.shape[1])
+            pred_expand = pred_expand.reshape(reshape_size)
+            gt_expand = gt_expand.reshape(reshape_size)
+#             print(pred_expand.shape)
+#             print(gt_expand.shape)
             score = dist_fn(pred_expand.float(), gt_expand.float())
 
             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)

@@ -12,11 +12,11 @@ class HypConeDist():
         which is not legal for torch.autograd. Need to make clone of
         the variable every step of the way
         '''
-        x_norm = torch.norm(x.clone(), p=2, dim=-1)
-        x_small = x[x_norm < (self.K + 1e-7)].clone().transpose(dim0=-1, dim1=-2)
-        scale_factor = ((self.K + 1e-7) / x_norm[x_norm < (self.K + 1e-7)].clone())
-        x_small_clone = (x_small * scale_factor).transpose(dim0=-1, dim1=-2)
-        x[x_norm < (self.K + 1e-7)] = x_small_clone.clone()
+        x_norm = torch.norm(x, p=2, dim=-1)
+        x_small = x.transpose(dim0=-1, dim1=-2)
+        scale_factor = ((0.1 + 1e-7) / x_norm)
+        x_small = (x_small * scale_factor).clone()
+        x = torch.where(x_norm < (0.1 + 1e-7), x_small, x.transpose(dim0=-1, dim1=-2)).transpose(dim0=-1, dim1=-2)
         return self.Xi(x, y) - self.Phi(x, K = self.K)
     def Xi(self, x, y):
         x_norm = torch.norm(x, p=2, dim=-1)

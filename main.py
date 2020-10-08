@@ -44,7 +44,8 @@ def get_args():
     parser.add_argument('--hyperbolic_version', default=1, type=int)
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
-    parser.add_argument('--margin', default=0.01, type=float, help='margin for entailment cone loss')
+    parser.add_argument('--pretrain', default='', type=str, help='path of pretrained model')
+    parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
@@ -168,6 +169,22 @@ def main():
         for name, param in model.named_parameters():
             print(name, param.requires_grad)
         print('\n==== start dataloading ====\n')
+        
+    if args.hyp_cone:
+        print(args.pretrain)
+        if args.pretrain is not None:
+            print_r(args, f"=> loading pretrained checkpoint for hyperbolic cone '{args.pretrain}'")
+            checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
+            model = neq_load_customized(model, checkpoint['state_dict'], parts=['backbone', 'agg', 'network_pred'])
+            print_r(args, f"=> loaded pretrained checkpoint for hyperbolic cone '{args.pretrain}' (epoch {checkpoint['epoch']})")
+        else:
+            print_r(args, f"=> no checkpoint found at '{args.pretrain}'")
+
+        print('\n==== parameter names and whether they require gradient ====\n')
+        for name, param in model.named_parameters():
+            print(name, param.requires_grad)
+        print('\n==== start dataloading ====\n')
+        
     if args.local_rank != -1:
         from torch.nn.parallel import DistributedDataParallel as DDP
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
@@ -179,8 +196,8 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = datasets.get_data(args, 'train', return_label=args.n_classes > 0)
-    val_loader = datasets.get_data(args, 'val', return_label=args.n_classes > 0)
+    train_loader = datasets.get_data(args, 'train', return_label=True)
+    val_loader = datasets.get_data(args, 'val', return_label=True)
 
     # setup tools
     img_path, model_path = set_path(args)

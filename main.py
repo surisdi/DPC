@@ -196,8 +196,8 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = datasets.get_data(args, 'train', return_label=True)
-    val_loader = datasets.get_data(args, 'val', return_label=True)
+    train_loader = datasets.get_data(args, 'train', return_label=True, hierarchical_label=args.hierarchical)
+    val_loader = datasets.get_data(args, 'val', return_label=True, hierarchical_label=args.hierarchical)
 
     # setup tools
     img_path, model_path = set_path(args)

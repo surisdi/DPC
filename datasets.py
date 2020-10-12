@@ -473,7 +473,7 @@ class Hollywood2(data.Dataset):
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
         if self.return_label and not self.hierarchical_label:
-            return t_seq, label, action
+            return t_seq, label
         if self.return_label and self.hierarchical_label:
             labels = []
             actions = []
@@ -619,7 +619,7 @@ class FineGym(data.Dataset):
         return len(self.clips)
 
 
-def get_data(args, mode='train', return_label=False):
+def get_data(args, mode='train', return_label=False, hierarchical_label=False):
     if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
         transform = transforms.Compose([
             augmentation.RandomHorizontalFlip(consistent=True),
@@ -663,7 +663,8 @@ def get_data(args, mode='train', return_label=False):
                              seq_len=args.seq_len,
                              num_seq=args.num_seq,
                              downsample=args.ds,
-                             return_label=return_label)
+                             return_label=return_label,
+                             hierarchical_label=hierarchical_label)
     elif args.dataset == 'finegym':
         dataset = FineGym(mode=mode,
                           transform=transform,
@@ -681,7 +682,7 @@ def get_data(args, mode='train', return_label=False):
                                       batch_size=args.batch_size,
                                       sampler=sampler,
                                       shuffle=False,
-                                      num_workers=0,
+                                      num_workers=32,
                                       pin_memory=True,
                                       drop_last=True)
     else:  # mode == 'val':

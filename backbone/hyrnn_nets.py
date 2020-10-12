@@ -210,7 +210,7 @@ class MobiusLinear(torch.nn.Linear):
 
 
 class MobiusDist2Hyperplane(torch.nn.Module):
-    def __init__(self, in_features, out_features, k=-1.0):
+    def __init__(self, in_features, out_features, k=-1.0, fp64_hyper=True):
         k = torch.tensor(k)
         super().__init__()
         self.in_features = in_features
@@ -222,6 +222,7 @@ class MobiusDist2Hyperplane(torch.nn.Module):
         point = gmath.expmap0(point, k=k)
         tangent = torch.randn(out_features, in_features)
         self.point = geoopt.ManifoldParameter(point, manifold=ball)
+        self.fp64_hyper = fp64_hyper
         with torch.no_grad():
             self.tangent = geoopt.ManifoldParameter(tangent, manifold=sphere).proj_()
 

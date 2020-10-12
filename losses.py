@@ -14,7 +14,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
             accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
             
         else:
-            if args.method == 1:
+            if args.method == 1: # train with multiple positive labels (for euclidean models)
                 gt = torch.zeros(B, pred.size(1))
                 gt[torch.arange(gt.size(0)).unsqueeze(1), labels] = 1 # multi-label ground truth tensor
                 gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
@@ -27,8 +27,20 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
                 for i in range(labels.size(1)):
                     hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
                     reward = reward / 2 
-            elif args.method == 2:
-                raise ValueError('method not implemented yet')
+            elif args.method == 2: # train with single positive labels (for hyperbolic models)
+                gt = torch.zeros(B, pred.size(1))
+                gt[torch.arange(gt.size(0)).unsqueeze(1), labels[:, 0].unsqueeze(1)] = 1 # one-hot ground truth tensor
+                gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
+                labels = torch.repeat_interleave(labels, args.num_seq, dim=0).to(args.device)
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt) # CE loss with logit as ground truth
+                accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
+#                 print(pred, gt)
+                hier_accuracy = 0
+                reward = 1
+                # reward value decay by 50% per level going up
+                for i in range(labels.size(1)):
+                    hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
+                    reward = reward / 2 
         results = accuracy, hier_accuracy, loss.item() / args.num_seq
     else:
         if args.hyp_cone:

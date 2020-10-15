@@ -2,10 +2,9 @@ import argparse
 import os
 import random
 import re
-import time
+import warnings
 from datetime import datetime
 
-import warnings
 warnings.simplefilter("ignore", UserWarning)
 
 import geoopt
@@ -13,17 +12,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.distributed
-import torchvision.utils as vutils
-from torch.utils import data
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import datasets, models, transforms
-from tqdm import tqdm
+from torchvision import datasets, models
 
 import datasets
 import models
 from trainer import Trainer
-from utils import augmentation
-from utils.utils import AverageMeter, denorm, calc_topk_accuracy, neq_load_customized
+from utils.utils import neq_load_customized
 
 plt.switch_backend('agg')
 
@@ -39,7 +34,7 @@ def print_r(args, text):
 def get_args():
     parser = argparse.ArgumentParser()
     # Task definition
-    parser.add_argument('--pred_step', default=3, type=int)
+    parser.add_argument('--pred_step', default=3, type=int, help='How subclips to predict')
     parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
     parser.add_argument('--hyperbolic_version', default=1, type=int)
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
@@ -49,10 +44,19 @@ def get_args():
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
+    parser.add_argument('--hierarchical', action='store_true',
+                        help='Works both for training with labels and for testing the accuracy')
+    parser.add_argument('--test', action='store_true', help='Test system')
+    # Eval info
     parser.add_argument('--finetune', action='store_true', help='Finetune model')
-    parser.add_argument('--hierarchical', action='store_true', help='evaluate with hierarchical labels')
-    parser.add_argument('--method', default=1, type=int, help='which method to use to evaluate')
-
+    parser.add_argument('--finetune_all', action='store_true',
+                        help='Finetune all model. If False, only train the linear layer. Only used if finetune=True')
+    parser.add_argument('--finetune_path', default='', type=str, help='path of pretrained model')
+    parser.add_argument('--finetune_input', default='features', type=str,
+                        help='Input to the last linear layer. In regular early action training (without finetuning) '
+                             'we always use "predictions". "last_prediction" should probably never be used because it '
+                             'is encompassed in "predictions"',
+                        choices=['features', 'predictions', 'pooled_features', 'last_prediction'])
     # Network
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
     # Data
@@ -61,13 +65,15 @@ def get_args():
     parser.add_argument('--num_seq', default=8, type=int, help='number of video blocks')
     parser.add_argument('--ds', default=3, type=int, help='frame downsampling rate')
     parser.add_argument('--n_classes', default=0, type=int)
+    parser.add_argument('--return_label',action='store_true', help='return labels')
+    parser.add_argument('--action_level_gt', action='store_true',
+                        help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     # Optimization
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float, help='weight decay')
     # Other
     parser.add_argument('--resume', default='', type=str, help='path of model to resume')
-    parser.add_argument('--finetune_path', default='', type=str, help='path of pretrained model')
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
     parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
@@ -82,6 +88,8 @@ def get_args():
     parser.add_argument('--fp64_hyper', action='store_true', help='Whether to use 64-bit float precision instead of '
                                                                   '32-bit for the hyperbolic layers and operations,'
                                                                   'Can be combined with --fp16')
+    parser.add_argument('--num_workers', default=32, type=int, help='number of workers for dataloader')
+
     parser.add_argument('--cross_gpu_score', action='store_true',
                         help='Compute the score matrix using as negatives samples from different GPUs')
 
@@ -94,6 +102,9 @@ def get_args():
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
+
+    if args.finetune and args.early_action:
+        assert args.action_level_gt, 'Early action recognition implies only action level, not subaction level'
 
     return args
 
@@ -162,9 +173,10 @@ def main():
         else:
             print_r(args, f"=> no checkpoint found at '{args.finetune_path}'")
 
-        for name, param in model.named_parameters(): # deleted 'module'
-            if not 'network_class' in name:
-                param.requires_grad = False
+        if not args.finetune_all:
+            for name, param in model.named_parameters(): # deleted 'module'
+                if not 'network_class' in name:
+                    param.requires_grad = False
         print('\n==== parameter names and whether they require gradient ====\n')
         for name, param in model.named_parameters():
             print(name, param.requires_grad)
@@ -196,8 +208,11 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = datasets.get_data(args, 'train', return_label=True, hierarchical_label=args.hierarchical)
-    val_loader = datasets.get_data(args, 'val', return_label=True, hierarchical_label=args.hierarchical)
+    train_loader = datasets.get_data(args, 'train', return_label=args.return_label,
+                                     hierarchical_label=args.hierarchical, action_level_gt=args.action_level_gt,
+                                     num_workers=args.num_workers)
+    val_loader = datasets.get_data(args, 'val', return_label=args.return_label, hierarchical_label=args.hierarchical,
+                                   action_level_gt=args.action_level_gt, num_workers=args.num_workers)
 
     # setup tools
     img_path, model_path = set_path(args)
@@ -209,8 +224,13 @@ def main():
         print('Preparing trainer')
     trainer = Trainer(args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
                       img_path, model_path, scheduler, partial=0.1)
-    trainer.train()
-    
+
+    if args.test:
+        trainer.test()
+    else:
+        trainer.train()
+
+
 def set_path(args):
     if args.resume:
         exp_path = os.path.dirname(os.path.dirname(args.resume))

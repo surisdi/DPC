@@ -12,6 +12,7 @@ import torchvision
 from torchvision import datasets, transforms
 from tqdm import tqdm
 from utils import augmentation
+import re
 
 
 def pil_loader(path):
@@ -344,6 +345,10 @@ class UCF101_3d(data.Dataset):
 
 
 class Hollywood2(data.Dataset):
+    """
+    Number of classes: 12
+    Number of classes including parents: 17 (12 + 5)
+    """
     def __init__(self,
                  mode='train',
                  transform=None,
@@ -489,29 +494,36 @@ class Hollywood2(data.Dataset):
 
 
 class FineGym(data.Dataset):
+    """
+    If we select gym288, the number of classes to predict is:
+    - 288 in the subaction level
+    - X in the action level
+    - X in the hierarchical level (288 + X + Y)
+    """
     def __init__(self,
                  mode='train',
                  path_dataset='/proj/vondrick/datasets/FineGym/',
                  transform=None,
                  seq_len=10,  # given duration distribution, we should aim for ~1.5 seconds (around 7-8 frames at 5 fps)
                  num_seq=5,
-                 downsample=3,
                  epsilon=5,
                  unit_test=False,
                  return_label=False,
                  gym288=True,
-                 use_stages=True,
-                 fps=5):
+                 fps=5,
+                 hierarchical_label=False,
+                 action_level_gt=False):
         self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
         self.num_seq = num_seq
-        self.downsample = downsample
         self.epsilon = epsilon
         self.unit_test = unit_test
         self.return_label = return_label
         self.fps = fps
+        self.hierarchical_label = hierarchical_label,
+        self.action_level_gt = action_level_gt
 
         if mode in ['train', 'val']:
             path_labels = 'gym288_train_element_v1.1.txt' if gym288 else 'gym99_train_element_v1.1.txt'
@@ -523,6 +535,31 @@ class FineGym(data.Dataset):
 
         with open(os.path.join(path_dataset, 'annotations/finegym_annotation_info_v1.1.json'), 'r') as f:
             self.annotations = json.load(f)
+
+        # Prepare superclasses
+        # First, load information about the available superclasses
+        self.parent_classes = {}
+        with open(os.path.join(path_dataset, 'categories/set_categories.txt'), 'r') as f:
+            class_number = 288 if gym288 else 99
+            set_grand_classes = set()
+            for line in f:
+                _, idx_class, name_class, _ = re.split(': |; |\\n', line)
+                # If there's only one element in the grand class, we still treat it as separate classes
+                grand_class = idx_class[0]
+                self.parent_classes[idx_class] = (class_number, name_class, grand_class)
+                set_grand_classes.add(grand_class)
+                class_number += 1
+        self.grand_classes = {name: class_number+i for i, name in enumerate(set_grand_classes)}
+
+        self.super_classes = {}
+        path_categories = 'gym288_categories.txt' if gym288 else 'gym99_categories.txt'
+        with open(os.path.join(path_dataset, 'categories', path_categories), 'r') as f:
+            for line in f:
+                line_split = re.split(': |; ', re.sub(' +', ' ', line))
+                subclass = int(line_split[1])
+                superclass_parent_idx = line_split[3]
+                superclass_grand_idx = superclass_parent_idx[0]
+                self.super_classes[subclass] = (superclass_parent_idx, superclass_grand_idx)
 
         clips = []
         for root, dirs, files in os.walk(os.path.join(path_dataset, 'event_videos')):
@@ -560,9 +597,6 @@ class FineGym(data.Dataset):
                 self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_train}
         self.idx2clipidx = {i: clipidx for i, clipidx in enumerate(self.clips.keys())}
 
-        if use_stages:
-            pass
-
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
         start = random.randint(0, len(segments) - self.num_seq)
@@ -598,12 +632,27 @@ class FineGym(data.Dataset):
                 # This happens when the specific case when the action is not part of the action classes (for example
                 # when it is very specific and we are working with gym99). In this case we still load the action because
                 # if we skip it the temporal prediction does not make sense.
-                labels.append(-1)
+                labels.append(-1 if not self.hierarchical_label else torch.tensor([-1]*3))
             else:
-                labels.append(self.subclipidx2label[subclipidx])
+                if self.hierarchical_label or self.action_level_gt:
+                    label_specific = self.subclipidx2label[subclipidx]
+                    p_idx, g_idx = self.super_classes[label_specific]
+                    labels.append(torch.tensor([label_specific, self.parent_classes[p_idx][0],
+                                                self.grand_classes[g_idx]]))
+                else:
+                    labels.append(self.subclipidx2label[subclipidx])
 
         total_clip = torch.stack(total_clip)
-        labels = torch.tensor(labels)
+        labels = torch.stack(labels)
+
+        if self.action_level_gt:
+            # All the subclips should have the same action grandparent, unless there's some "-1"
+            labels_to_consider = labels[:, -1][labels[:, -1] != -1]
+            if len(labels_to_consider) > 0:
+                assert torch.all(labels_to_consider == labels_to_consider[0]), 'What is going on?'
+                labels = labels_to_consider[0]
+            else:
+                labels = torch.tensor(-1)
 
         return total_clip, labels
 
@@ -619,7 +668,75 @@ class FineGym(data.Dataset):
         return len(self.clips)
 
 
-def get_data(args, mode='train', return_label=False, hierarchical_label=False):
+class MovieNet(data.Dataset):
+    def __init__(self, mode='train', transform=None, num_seq=5):
+        self.path_dataset = '/proj/vondrick/datasets/MovieNet'
+        self.mode = mode
+        self.transform = transform
+        self.num_seq = num_seq
+
+        path_save = f'/proj/vondrick/shared/DPC/data_info/movienet_{mode}.pth'
+
+        if os.path.isfile(path_save):
+            self.clips, self.subclip_seqs = torch.load(path_save)
+        else:
+            self.clips = defaultdict(lambda: defaultdict(list))
+            for root, dirs, files in tqdm(os.walk(os.path.join(self.path_dataset, '240P'))):
+                for file in files:
+                    if file.endswith('.jpg'):
+                        video_num = root.split('/')[-1]
+                        _, clip_num, _, frame_num = file.replace('.jpg', '').split('_')
+                        self.clips[video_num][int(clip_num)].append(int(frame_num))
+
+            randomized_indices = list(range(len(self.clips)))
+            random.Random(500).shuffle(randomized_indices)
+            low, high = {'train': [0, 0.8], 'val': [0.8, 0.9], 'test': [0.9, 1]}[self.mode]
+            labels_mode = randomized_indices[int(low*len(self.clips)):int(high*len(self.clips))]
+            self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_mode}
+
+            # split clips into subclip sequences of num_seq elements
+            self.subclip_seqs = []
+            for k, v in self.clips.items():
+                all_clips = np.sort(list(v.keys()))
+                all_clips = all_clips[:num_seq*(len(all_clips)//num_seq)].reshape(len(all_clips)//num_seq, num_seq)
+                for i in range(all_clips.shape[0]):
+                    self.subclip_seqs.append((all_clips[i], k, i))
+
+            torch.save((self.clips, self.subclip_seqs), path_save)
+
+    def read_video(self, subclip_idxs, video_idx):
+
+        path_clip = os.path.join(self.path_dataset, '240P', video_idx)
+        total_clip = []
+        for subclip_idx in subclip_idxs:
+            frame_list = np.sort(self.clips[video_idx][subclip_idx])
+            assert len(frame_list) == 3
+            for frame in frame_list:
+                img = Image.open(os.path.join(path_clip, f'shot_{subclip_idx:04d}_img_{frame}.jpg'))
+                total_clip.append(img)
+
+        total_clip = torch.stack(self.transform(total_clip))  # apply same transform
+        total_clip = total_clip.view([len(subclip_idxs), 3] + list(total_clip[0].shape[-3:]))
+
+        return total_clip
+
+    def __getitem__(self, index):
+        subclip_idxs, video_idx, seq_idx = self.subclip_seqs[index]
+        video = self.read_video(subclip_idxs, video_idx)
+        label = torch.tensor(-1)
+        return video, label
+
+    def __len__(self):
+        return len(self.subclip_seqs)
+
+
+def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, num_workers=0):
+
+    if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
+        raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
+    if return_label and not action_level_gt and args.dataset != 'finegym':
+        raise Exception('subaction only subactions available in finegym dataset')
+
     if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
         transform = transforms.Compose([
             augmentation.RandomHorizontalFlip(consistent=True),
@@ -670,8 +787,14 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False):
                           transform=transform,
                           seq_len=args.seq_len,
                           num_seq=args.num_seq,
-                          downsample=args.ds,
-                          return_label=return_label)
+                          fps=int(25/args.ds),  # approx
+                          return_label=return_label,
+                          hierarchical_label=hierarchical_label,
+                          action_level_gt=action_level_gt)
+    elif args.dataset == 'movienet':
+        assert not return_label, 'Not yet implemented (actions not available online)'
+        assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
+        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq)
     else:
         raise ValueError('dataset not supported')
 
@@ -682,7 +805,7 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False):
                                       batch_size=args.batch_size,
                                       sampler=sampler,
                                       shuffle=False,
-                                      num_workers=32,
+                                      num_workers=num_workers,
                                       pin_memory=True,
                                       drop_last=True)
     else:  # mode == 'val':
@@ -690,7 +813,7 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False):
                                       batch_size=args.batch_size,
                                       sampler=sampler,
                                       shuffle=False,
-                                      num_workers=32,
+                                      num_workers=num_workers,
                                       pin_memory=True,
                                       drop_last=True)
     return data_loader

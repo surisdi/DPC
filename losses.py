@@ -3,83 +3,109 @@ import utils.utils as utils
 import geoopt
 from utils.hyp_cone import HypConeDist
 import copy
-
+import numpy as np
 
 def compute_loss(args, score, pred, labels, target, sizes, B):
 
     if args.finetune or (args.early_action and not args.early_action_self):
-        if not args.hierarchical:
-            gt = labels.repeat_interleave(args.num_seq).to(args.device)
-            loss = torch.nn.functional.cross_entropy(pred, gt)
-            accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
-            
-        else:
-            if args.method == 1: # train with multiple positive labels (for euclidean models)
-                gt = torch.zeros(B, pred.size(1))
-                gt[torch.arange(gt.size(0)).unsqueeze(1), labels] = 1 # multi-label ground truth tensor
-                gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
-                labels = torch.repeat_interleave(labels, args.num_seq, dim=0).to(args.device)
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt) # CE loss with logit as ground truth
-                accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
-                hier_accuracy = 0
-                reward = 1
-                # reward value decay by 50% per level going up
-                for i in range(labels.size(1)):
-                    hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                    reward = reward / 2 
-            elif args.method == 2: # train with single positive labels (for hyperbolic models)
-                gt = torch.zeros(B, pred.size(1))
-                gt[torch.arange(gt.size(0)).unsqueeze(1), labels[:, 0].unsqueeze(1)] = 1 # one-hot ground truth tensor
-                gt = torch.repeat_interleave(gt, args.num_seq, dim=0).to(args.device)
-                labels = torch.repeat_interleave(labels, args.num_seq, dim=0).to(args.device)
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt) # CE loss with logit as ground truth
-                accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
-#                 print(pred, gt)
-                hier_accuracy = 0
-                reward = 1
-                # reward value decay by 50% per level going up
-                for i in range(labels.size(1)):
-                    hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                    reward = reward / 2 
-        results = accuracy, hier_accuracy, loss.item() / args.num_seq
+        results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
-        if args.hyp_cone:
-            score[score < 0] = 0
-            pos = score.diag().clone()
-            neg = torch.relu(args.margin - score)
-            neg.fill_diagonal_(0)
-            loss_pos = pos.sum()
-            loss_neg = neg.sum() / score.shape[0]
-#             print('pos_loss ', loss_pos.item())
-#             print('neg_loss ', loss_neg.item())
-            loss = loss_pos + loss_neg
-
-            # TODO check this
-            [A, B] = score.shape
-            score = score[:B, :]
-            pos = score.diagonal(dim1=-2, dim2=-1)
-            pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
-            k = score.shape[0]
-            score.as_strided([k], [k + 1]).copy_(torch.zeros(k))
-            neg_acc = float((score == 0).sum().item() - k) / float(k ** 2 - k)
-
-            results = pos_acc, neg_acc, loss.item() / (2 * k ** 2)
-
-        else:
-            _, B2, NS, NP, SQ = sizes
-            # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
-            # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
-            score_flattened = score.view(B * NP * SQ, B2 * NS * SQ)
-            target_flattened = target.view(B * NP * SQ, B2 * NS * SQ)
-            target_flattened = target_flattened.float().argmax(dim=1)
-
-            loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
-            top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
-
-            results = top1, top3, top5, loss.item()
+        results, loss = compute_selfsupervised_loss(args, score, target, sizes, B)
 
     to_return = [loss] + [torch.tensor(r).cuda() for r in results + (B,)]
     return to_return
+
+
+def compute_supervised_loss(args, pred, labels, B):
+    """
+    Six options to predict:
+    1. Predict a single label for each sample (clip). Both num of labels and prediction size are equal to batch size
+    2. Predict a single label, but for subclip-level predictions. Prediction size has a temporal element. Repeat label
+    3. Same as 1 but also with hierarchical information
+    4. Same as 2 but also with hierarchical information
+    5. Predict with sub-action level. Prediction size and label size are the same, and larger than batch size
+    6. Predict with sub-action level and also predict parent nodes (args.hierarchical)
+    """
+    if not args.hierarchical:
+        hier_accuracy = -1
+        if labels.shape[0] < pred.shape[0]:
+            if len(labels.shape) == 1:  # Option 2
+                assert pred.shape[0] % labels.shape[0] == 0, \
+                    'Maybe you are only using some predictions for some time steps and not all of them? In that ' \
+                    'case, select the appropriate labels (either in this function, or in the dataloader). In that ' \
+                    'case, you should not enter in this "if", and go directly to the "else"'
+                gt = labels.repeat_interleave(args.num_seq).to(args.device)
+            else:  # We also have temporal information in the labels (subaction labels). Option 5
+                gt = labels.view(-1).to(args.device)
+        else:  # Option 1
+            gt = labels.to(args.device)
+        loss = torch.nn.functional.cross_entropy(pred, gt)
+        accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
+
+    else:
+        # train with multiple positive labels
+        if labels.shape[0] < pred.shape[0]:
+            if len(labels.shape) == 2:  # Option 4
+                assert pred.shape[0] % labels.shape[0] == 0
+                labels = labels.repeat_interleave(args.num_seq, dim=0).to(args.device)
+            else:  # labels should have 3 dimensions (batch, temporal, hierarchy). Option 6
+                labels = labels.view(-1, labels.shape[-1]).to(args.device)
+        else:  # Options 2
+            labels = labels.to(args.device)
+
+        gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
+        indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
+        gt[indices, labels] = 1
+
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt)  # CE loss with logit as ground truth
+        accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
+        hier_accuracy = 0
+        reward = 1
+        # reward value decay by 50% per level going up
+        for i in range(labels.size(1)):
+            hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)  # TODO check this
+            reward = reward / 2
+
+    results = accuracy, hier_accuracy, loss.item() / args.num_seq
+    return results, loss
+
+
+def compute_selfsupervised_loss(args, score, target, sizes, B):
+    if args.hyp_cone:
+        score[score < 0] = 0
+        pos = score.diag().clone()
+        neg = torch.relu(args.margin - score)
+        neg.fill_diagonal_(0)
+        loss_pos = pos.sum()
+        loss_neg = neg.sum() / score.shape[0]
+        #             print('pos_loss ', loss_pos.item())
+        #             print('neg_loss ', loss_neg.item())
+        loss = loss_pos + loss_neg
+
+        # TODO check this
+        [A, B] = score.shape
+        score = score[:B, :]
+        pos = score.diagonal(dim1=-2, dim2=-1)
+        pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
+        k = score.shape[0]
+        score.as_strided([k], [k + 1]).copy_(torch.zeros(k))
+        neg_acc = float((score == 0).sum().item() - k) / float(k ** 2 - k)
+
+        results = pos_acc, neg_acc, loss.item() / (2 * k ** 2)
+
+    else:
+        _, B2, NS, NP, SQ = sizes
+        # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
+        # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
+        score_flattened = score.view(B * NP * SQ, B2 * NS * SQ)
+        target_flattened = target.view(B * NP * SQ, B2 * NS * SQ)
+        target_flattened = target_flattened.float().argmax(dim=1)
+
+        loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
+        top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
+
+        results = top1, top3, top5, loss.item()
+    return results, loss
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):

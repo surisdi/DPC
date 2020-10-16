@@ -51,7 +51,12 @@ class Trainer:
                                 is_best, filename=os.path.join(self.model_path, f'epoch{epoch+1}.pth.tar'),
                                 keep_all=False)
 
-    def run_epoch(self, epoch, train=True):
+    def test(self):
+        accuracies_test = self.run_epoch(epoch=None, train=False)
+        print('Accuracies test:')
+        print(accuracies_test)
+
+    def run_epoch(self, epoch, train=True, return_all_acc=False):
         if self.args.device == "cuda":
             torch.cuda.synchronize()
         if train:
@@ -59,14 +64,14 @@ class Trainer:
         else:
             self.model.eval()
 
-        avg_meters = {k: AverageMeter() for k in ['losses', 'accuracy', 'hier_accuracy', 'top1', 'top3', 'top5', 'pos_acc', 'neg_acc',
-                                                  'p_norm', 'g_norm', 'batch_time', 'data_time']}
+        avg_meters = {k: AverageMeter() for k in ['losses', 'accuracy', 'hier_accuracy', 'top1', 'top3', 'top5',
+                                                  'pos_acc', 'neg_acc', 'p_norm', 'g_norm', 'batch_time', 'data_time']}
 
         time_last = time.time()
 
         with tqdm(self.loaders['train' if train else 'val'], desc=f'Training epoch {epoch}' if train else
-                  f'Evaluating {f"epoch {epoch}" if epoch else ""}', disable=self.args.local_rank > 0, \
-                  total = int(len(self.loaders['train' if train else 'val']) * (self.partial if train else 1.0))) as t:
+                  f'Evaluating {f"epoch {epoch}" if epoch else ""}', disable=self.args.local_rank > 0,
+                  total=int(len(self.loaders['train' if train else 'val']) * (self.partial if train else 1.0))) as t:
             for idx, (input_seq, labels) in enumerate(t):
                 stop = int(len(self.loaders['train' if train else 'val']) * (self.partial if train else 1.0))
                 if idx >= stop:
@@ -140,7 +145,7 @@ class Trainer:
                     self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
                     self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)
 
-            return accuracy_list['accuracy']
+            return accuracy_list if return_all_acc else accuracy_list['accuracy']
 
 
 def gather_tensor(v):

@@ -94,6 +94,10 @@ class Model(nn.Module):
                                     )
             self._initialize_weights(self.network_pred)
 
+        # If the task is predicting the last subaction, we need some indexing of how far it is
+        if self.args.early_action_self or (self.args.early_action and not self.args.action_level_gt):
+            self.time_index = nn.Embedding(self.args.num_seq, self.param['feature_size'])
+
         self.mask = None
         self.relu = nn.ReLU(inplace=False)
         self._initialize_weights(self.agg)
@@ -134,6 +138,8 @@ class Model(nn.Module):
 
         # before ReLU, (-inf, +inf)
         feature_dist = feature_dist.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
+        feature_predict_from = feature_dist  # To train linear layer on top of
+        # And these are the features we have to "predict to" (in the self-supervised setting)
         feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
         feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2, self.param['feature_size'])  # .transpose(0,1)
 
@@ -143,21 +149,37 @@ class Model(nn.Module):
         # [B,N,D,6,6], [0, +inf)
         feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
 
+        # If the task is predicting the last subaction, we need some indexing of how far it is
+        if self.args.early_action_self or (self.args.early_action and not self.args.action_level_gt):
+            feature += self.time_index(torch.range(0, feature.shape[1]-1).long().to('cuda'))[None, :, :, None, None]
+
         hidden_all, hidden = self.agg(feature[:, 0:N-self.args.pred_step, :].contiguous())
         hidden = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
 
         if self.args.finetune or (self.args.early_action and not self.args.early_action_self):
-            # pool
-            pooled_hidden = hidden_all.mean(dim=[-2, -1]).view(-1, hidden_all.shape[2])  # just pool spatially
+            if self.args.finetune and self.args.finetune_input == 'features':
+                input_linear = feature_predict_from.mean(dim=[-2, -1])   # pool only spatially
+            elif self.args.finetune and self.args.finetune_input == 'pooled_features':
+                input_linear = feature_predict_from.mean(dim=[1, -2, -1])  # pool spatially and temporally
+            elif self.args.finetune and self.args.finetune_input == 'last_prediction':
+                # TODO do this step? Only necessary if we want prediction and features to be in the same space
+                hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
+                # pool spatially and use only last temporally
+                input_linear = hidden_all_projected.mean(dim=[-2, -1])[:, -1]
+            else:  # use prediction without pooling temporally
+                # TODO do this step? Only necessary if we want prediction and features to be in the same space
+                hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
+                input_linear = hidden_all_projected.mean(dim=[-2, -1])  # just pool spatially
+            input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
             # Predict label supervisedly
             if self.args.hyperbolic:
-                feature_shape = pooled_hidden.shape
-                pooled_hidden = pooled_hidden.view(-1, feature_shape[-1])
-                if self.fp64_hyper:
-                    pooled_hidden = pooled_hidden.double()
-                pooled_hidden = self.hyperbolic_linear(pooled_hidden)
-                pooled_hidden = pooled_hidden.view(feature_shape)
-            pred_classes = self.network_class(pooled_hidden)
+                feature_shape = input_linear.shape
+                input_linear = input_linear.view(-1, feature_shape[-1])
+                if self.args.fp64_hyper:
+                    input_linear = input_linear.double()
+                input_linear = self.hyperbolic_linear(input_linear)
+                input_linear = input_linear.view(feature_shape)
+            pred_classes = self.network_class(input_linear)
             pred = pred_classes
             size_pred = 1
 

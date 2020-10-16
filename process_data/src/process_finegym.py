@@ -4,6 +4,28 @@ Each clip contains the whole exercise (event)
 Each subclip contains a move/step (segment, action)
 """
 
+"""
+Command to reduce video size before executing this code:
+-n: Do not overwrite
+-y: Do overwrite
+
+for file in /proj/vondrick/datasets/FineGym/videos/*/*.mkv; do
+    ffmpeg -y -i "$file" -c:v copy -c:a aac "${file%.*}.mp4"
+done
+
+for file in /proj/vondrick/datasets/FineGym/videos/*/*.mp4
+do
+    if ! grep -q _reduced <<< "$file"; then
+        ffmpeg -n -i "$file" -vf "scale=max(256\,round(256*iw/ih)):-2" -c:a copy "${file%.*}_reduced.mp4"
+    fi
+done
+
+for file in /proj/vondrick/datasets/FineGym/videos/*/*.mp4
+do
+    ec
+done
+"""
+
 import os
 import json
 import subprocess
@@ -13,15 +35,19 @@ folder_dataset = '/proj/vondrick/datasets/FineGym'
 # for 'segment' the 'events' have to be already extracted.
 # for 'stage' the 'segments' have to be already extracted (only with events could be enough if there is no case of
 # stages in videos with more than one segment)
-to_extract = 'stage'  # ['event', 'segment', 'stage']
+to_extract = 'event'  # ['event', 'segment', 'stage']
 
 
 def main():
     with open(os.path.join(folder_dataset, 'annotations/finegym_annotation_info_v1.1.json'), 'r') as f:
         annotations = json.load(f)
 
-    pool = Pool(processes=30)
-    pool.map(process_video, annotations.items())
+    # pool = Pool(processes=30)
+    # pool.map(process_video, annotations.items())
+    for item in annotations.items():
+        video_id, events = item
+        if video_id == 'Gv53p8QE6bM':
+            process_video(item)
 
 
 def process_video(inputs):
@@ -44,11 +70,11 @@ def process_video(inputs):
                 name_subclip = video_id + '_' + event_id + '_' + segment_id
                 path_subclip = os.path.join(folder_dataset, 'action_videos', f'{name_subclip}.mp4')
                 # this is only to extract the clips with more than 1 stage that were extracted incorrectly before
-                if len(segment_data['timestamps']) > 1:
-                    paths_original.append(path_clip)
-                    paths_new.append(path_subclip)
-                    ts = segment_data['timestamps']
-                    timestamps.append([ts[0][0], ts[len(ts)-1][1]])
+                # if len(segment_data['timestamps']) > 1:
+                paths_original.append(path_clip)
+                paths_new.append(path_subclip)
+                ts = segment_data['timestamps']
+                timestamps.append([ts[0][0], ts[len(ts)-1][1]])
         elif to_extract == 'stage' and event_data['segments'] is not None:
             num_segments = len(event_data['segments'])
             for segment_id, stages in event_data['segments'].items():
@@ -71,7 +97,7 @@ def process_video(inputs):
 
 def extract_video(paths_original, paths_new, timestamps):
     for path_original, path_new, timestamp in zip(paths_original, paths_new, timestamps):
-        if os.path.isfile(path_original):  # and not os.path.isfile(path_new):
+        if os.path.isfile(path_original) and not os.path.isfile(path_new):
             # -y overwrites
             instruction = f'ffmpeg -y -i {path_original} -ss {timestamp[0]} -to {timestamp[1]} -c:v libx264 -c:a copy {path_new}'
             subprocess.call(instruction, shell=True)

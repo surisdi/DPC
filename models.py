@@ -54,6 +54,7 @@ class Model(nn.Module):
                                                   )
             if args.fp64_hyper:
                 self.hyperbolic_linear = self.hyperbolic_linear.double()
+        self.fp64_hyper = args.fp64_hyper
 
         self.agg = ConvGRU(input_size=self.param['feature_size'],
                            hidden_size=self.param['hidden_size'],
@@ -62,9 +63,29 @@ class Model(nn.Module):
 
         if args.finetune or (args.early_action and not args.early_action_self):
             if args.hyperbolic:
-                self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
+                self.network_class = nn.Sequential(
+                                        MobiusLinear(self.param['feature_size'], self.param['feature_size'],
+                                                  hyperbolic_input=True,
+                                                  hyperbolic_bias=True,
+                                                  nonlin=nn.ReLU(inplace=True),  # For now
+                                                  fp64_hyper=args.fp64_hyper
+                                                  ),
+                                        MobiusLinear(self.param['feature_size'], self.param['feature_size'],
+                                                  hyperbolic_input=True,
+                                                  hyperbolic_bias=True,
+                                                  nonlin=None,  # For now
+                                                  fp64_hyper=args.fp64_hyper
+                                                  ),
+                                        MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
+                    
+                                        )
             else:
-                self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
+#                 self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
+                self.network_class = nn.Sequential(
+                                        nn.Linear(self.param['feature_size'], self.param['feature_size']),
+                                        nn.ReLU(inplace=True),
+                                        nn.Linear(self.param['feature_size'], args.n_classes)
+                                        )
         else:
             self.network_pred = nn.Sequential(
                                     nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0),

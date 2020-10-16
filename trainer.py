@@ -10,6 +10,8 @@ import losses
 import random
 from utils.utils import save_checkpoint, AverageMeter
 
+torch.autograd.set_detect_anomaly(True)
+
 
 class Trainer:
     def __init__(self, args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
@@ -100,7 +102,8 @@ class Trainer:
                     else:
                         loss, results = output_model
                     losses.bookkeeping(self.args, avg_meters, results)
-
+                
+                    
                 del input_seq
 
                 if train:

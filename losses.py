@@ -16,7 +16,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
     return to_return
 
 
-def compute_supervised_loss(args, pred, labels, B):
+def compute_supervised_loss(args, pred, labels, B, top_down=False):
     """
     Six options to predict:
     1. Predict a single label for each sample (clip). Both num of labels and prediction size are equal to batch size
@@ -62,9 +62,14 @@ def compute_supervised_loss(args, pred, labels, B):
         hier_accuracy = 0
         reward = 1
         # reward value decay by 50% per level going up
-        for i in range(labels.size(1)):
-            hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)  # TODO check this
-            reward = reward / 2
+        if top_down:
+            for i in reversed(range(labels.size(1))):
+                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
+                reward = reward / 2
+        else:
+            for i in range(labels.size(1)):
+                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
+                reward = reward / 2
 
     results = accuracy, hier_accuracy, loss.item() / args.num_seq
     return results, loss

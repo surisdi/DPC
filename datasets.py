@@ -152,7 +152,6 @@ class Kinetics600_full_3d(data.Dataset):
                  downsample=3,
                  epsilon=5,
                  unit_test=False,
-                 big=False,
                  return_label=False):
         self.mode = mode
         self.transform = transform
@@ -163,30 +162,15 @@ class Kinetics600_full_3d(data.Dataset):
         self.unit_test = unit_test
         self.return_label = return_label
 
-        if big:
-            print('Using Kinetics600 full data (256x256)')
-        else:
-            print('Using Kinetics600 full data (150x150)')
-
         # splits
-        if big:
-            if mode == 'train':
-                split = 'process_data/k600/train_split_ssd.csv'
-                video_info = pd.read_csv(split, header=None)
-            elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/k600/val_split_ssd.csv'
-                video_info = pd.read_csv(split, header=None)
-            else:
-                raise ValueError('wrong mode')
-        else:  # small
-            if mode == 'train':
-                split = 'process_data/k600/train_split_ssd.csv'
-                video_info = pd.read_csv(split, header=None)
-            elif (mode == 'val') or (mode == 'test'):
-                split = 'process_data/k600/val_split_ssd.csv'
-                video_info = pd.read_csv(split, header=None)
-            else:
-                raise ValueError('wrong mode')
+        if mode == 'train':
+            split = 'process_data/data/kinetics600/train_split.csv'
+            video_info = pd.read_csv(split, header=None)
+        elif (mode == 'val') or (mode == 'test'):
+            split = 'process_data/data/kinetics600/val_split.csv'
+            video_info = pd.read_csv(split, header=None)
+        else:
+            raise ValueError('wrong mode')
 
         path_drop_idx = f'process_data/data/drop_idx_{mode}.pth'
         if os.path.isfile(path_drop_idx):
@@ -216,10 +200,8 @@ class Kinetics600_full_3d(data.Dataset):
         return [seq_idx_block, vpath]
 
     def __getitem__(self, index):
-        a = time.time()
         vpath, vlen = self.video_info.iloc[index]
         vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
-        a1 = time.time()
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
 
@@ -227,19 +209,12 @@ class Kinetics600_full_3d(data.Dataset):
         assert idx_block.shape == (self.num_seq, self.seq_len)
         idx_block = idx_block.reshape(self.num_seq * self.seq_len)
 
-        a2 = time.time()
-
         seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
-        a3 = time.time()
         t_seq = self.transform(seq)  # apply same transform
-        a4 = time.time()
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-        b = time.time()
-        if self.return_label:
-            return t_seq, 0  # placeholder, need implement
-        return t_seq
+        return t_seq, 0  # placeholder, need implement
 
     def __len__(self):
         return len(self.video_info)
@@ -579,13 +554,18 @@ class FineGym(data.Dataset):
 
         self.clips = {}  # Actual clips used in the dataset, with its actions
         for clip in clips:
-            if clip not in clips_in_labels:
+            if self.return_label and clip not in clips_in_labels:
                 continue
             assert len(clip) == 27  # youtube ID is 11, event ID is 15, and the separation
             video_id = clip[:11]
             event_id = clip[12:]
             segments = self.annotations[video_id][event_id]['segments']
-            if segments is not None and len(segments) >= self.num_seq:
+            if segments is not None and (
+                    len(segments) >= self.num_seq if self.return_label else  # This is filtering several short videos
+                    np.array([s['stages'] for s in segments.values()]).sum() >= self.num_seq):
+                if np.array([s['stages'] > 1 for s in segments.values()]).any() and not self.return_label:
+                    segments = {k1 + f'_{i}': {'timestamps': v1['timestamps'][i]} for k1, v1 in segments.items()
+                                for i in range(v1['stages'])}
                 self.clips[clip] = segments
 
         if mode in ['train', 'val']:
@@ -605,7 +585,8 @@ class FineGym(data.Dataset):
         labels = []
         for i in range(start, start + self.num_seq):
             subclipidx = clipidx + '_' + actions[i]
-            path_clip = os.path.join(self.path_dataset, 'action_videos', f'{subclipidx}.mp4')
+            subfolder = 'action_videos' if len(actions[i]) == 11 else 'stage_videos'
+            path_clip = os.path.join(self.path_dataset, subfolder, f'{subclipidx}.mp4')
             if os.path.isfile(path_clip):
                 video, audio, info = torchvision.io.read_video(path_clip, start_pts=0, end_pts=None, pts_unit='sec')
                 video = video.float()
@@ -759,13 +740,11 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
         ])
 
     if args.dataset == 'k600':
-        use_big_K600 = args.img_dim > 140
         dataset = Kinetics600_full_3d(mode=mode,
                                       transform=transform,
                                       seq_len=args.seq_len,
                                       num_seq=args.num_seq,
                                       downsample=5,
-                                      big=use_big_K600,
                                       return_label=return_label)
     elif args.dataset == 'ucf101':
         dataset = UCF101_3d(mode=mode,

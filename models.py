@@ -157,17 +157,11 @@ class Model(nn.Module):
         hidden = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
 
         if self.args.finetune or (self.args.early_action and not self.args.early_action_self):
-            if self.args.finetune and self.args.finetune_input == 'features':
+            if self.args.finetune and self.args.finetune_input == 'features_z':
                 input_linear = feature_predict_from.mean(dim=[-2, -1])   # pool only spatially
-            elif self.args.finetune and self.args.finetune_input == 'pooled_features':
-                input_linear = feature_predict_from.mean(dim=[1, -2, -1])  # pool spatially and temporally
-            elif self.args.finetune and self.args.finetune_input == 'last_prediction':
-                # TODO do this step? Only necessary if we want prediction and features to be in the same space
-                hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
-                # pool spatially and use only last temporally
-                input_linear = hidden_all_projected.mean(dim=[-2, -1])[:, -1]
-            else:  # use prediction without pooling temporally
-                # TODO do this step? Only necessary if we want prediction and features to be in the same space
+            elif self.args.finetune and self.args.finetune_input == 'predictions_c':
+                input_linear = hidden_all.mean(dim=[-2, -1])  # just pool spatially
+            else:  # 'predictions_z_hat'
                 hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
                 input_linear = hidden_all_projected.mean(dim=[-2, -1])  # just pool spatially
             input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer

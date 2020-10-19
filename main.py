@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
-    parser.add_argument('--hierarchical', action='store_true',
+    parser.add_argument('--hierarchical_labels', action='store_true',
                         help='Works both for training with labels and for testing the accuracy')
     parser.add_argument('--test', action='store_true', help='Test system')
     # Eval info
@@ -52,11 +52,8 @@ def get_args():
     parser.add_argument('--finetune_all', action='store_true',
                         help='Finetune all model. If False, only train the linear layer. Only used if finetune=True')
     parser.add_argument('--finetune_path', default='', type=str, help='path of pretrained model')
-    parser.add_argument('--finetune_input', default='features', type=str,
-                        help='Input to the last linear layer. In regular early action training (without finetuning) '
-                             'we always use "predictions". "last_prediction" should probably never be used because it '
-                             'is encompassed in "predictions"',
-                        choices=['features', 'predictions', 'pooled_features', 'last_prediction'])
+    parser.add_argument('--finetune_input', default='features', type=str, help='Input to the last linear layer',
+                        choices=['features_z', 'predictions_c', 'predictions_z_hat'])
     # Network
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
     # Data
@@ -65,7 +62,7 @@ def get_args():
     parser.add_argument('--num_seq', default=8, type=int, help='number of video blocks')
     parser.add_argument('--ds', default=3, type=int, help='frame downsampling rate')
     parser.add_argument('--n_classes', default=0, type=int)
-    parser.add_argument('--return_label',action='store_true', help='return labels')
+    parser.add_argument('--return_label', action='store_true', help='return labels')
     parser.add_argument('--action_level_gt', action='store_true',
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     # Optimization
@@ -75,7 +72,7 @@ def get_args():
     # Other
     parser.add_argument('--resume', default='', type=str, help='path of model to resume')
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run')
-    parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
+    parser.add_argument('--start_epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
     parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
     parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
@@ -209,10 +206,11 @@ def main():
 
     # ---------------------------- Prepare dataset ----------------------------- #
     train_loader = datasets.get_data(args, 'train', return_label=args.return_label,
-                                     hierarchical_label=args.hierarchical, action_level_gt=args.action_level_gt,
+                                     hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
                                      num_workers=args.num_workers)
-    val_loader = datasets.get_data(args, 'val', return_label=args.return_label, hierarchical_label=args.hierarchical,
-                                   action_level_gt=args.action_level_gt, num_workers=args.num_workers)
+    val_loader = datasets.get_data(args, 'val', return_label=args.return_label,
+                                   hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
+                                   num_workers=args.num_workers)
 
     # setup tools
     img_path, model_path = set_path(args)

@@ -27,9 +27,9 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
     3. Same as 1 but also with hierarchical information
     4. Same as 2 but also with hierarchical information
     5. Predict with sub-action level. Prediction size and label size are the same, and larger than batch size
-    6. Predict with sub-action level and also predict parent nodes (args.hierarchical)
+    6. Predict with sub-action level and also predict parent nodes (args.hierarchical_labels)
     """
-    if not args.hierarchical:
+    if not args.hierarchical_labels:
         hier_accuracy = -1
         if labels.shape[0] < pred.shape[0]:
             if len(labels.shape) == 1:  # Option 2

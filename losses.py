@@ -5,6 +5,9 @@ from utils.hyp_cone import HypConeDist
 import copy
 import numpy as np
 
+from hurry.filesize import size
+from utils.poincare_distance import poincare_distance
+
 def compute_loss(args, score, pred, labels, target, sizes, B):
 
     if args.finetune or (args.early_action and not args.early_action_self):
@@ -120,21 +123,14 @@ def compute_scores(args, pred, feature_dist, sizes, B):
     last_size, size_gt, size_pred = sizes.cpu().numpy()
 
     if args.hyperbolic:
-
-        shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
-        pred_expand = pred.unsqueeze(1).expand(shape_expand)
-        gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
-#         print(pred_expand.shape)
-#         print(gt_expand.shape)
-
         if args.hyp_cone:
-
+            shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
+            pred_expand = pred.unsqueeze(1).expand(shape_expand)
+            gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
             dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
             reshape_size = (pred.shape[0] * feature_dist.shape[0], pred.shape[1])
             pred_expand = pred_expand.reshape(reshape_size)
             gt_expand = gt_expand.reshape(reshape_size)
-#             print(pred_expand.shape)
-#             print(gt_expand.shape)
             score = dist_fn(pred_expand.float(), gt_expand.float())
 
             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
@@ -146,10 +142,13 @@ def compute_scores(args, pred, feature_dist, sizes, B):
             # But this is much faster... TODO implement batch dist_matrix on geoopt library
             # score = dist_matrix(pred_hyp, feature_inf_hyp)
 
-            manif = geoopt.manifolds.PoincareBall(c=1)
-
-            # score = manif.dist(pred_expand, gt_expand)
-            score = manif.dist(pred_expand.float(), gt_expand.float())
+            '''
+            replacing geoopt distance
+            '''
+#             manif = geoopt.manifolds.PoincareBall(c=1)
+#             score = manif.dist(pred_expand, gt_expand)
+#             score = manif.dist(pred_expand.float(), gt_expand.float())
+            score = poincare_distance(pred, feature_dist)
             if args.distance == 'squared':
                 score = score.pow(2)
             elif args.distance == 'cosh':
@@ -226,3 +225,5 @@ def bookkeeping(args, avg_meters, results):
             avg_meters['top5'].update(top5, B)
             avg_meters['losses'].update(loss, B)
             avg_meters['accuracy'].update(top1, B)
+            
+

@@ -239,7 +239,7 @@ class Kinetics600_full_3d(data.Dataset):
         b = time.time()
         if self.return_label:
             return t_seq, 0  # placeholder, need implement
-        return t_seq
+        return t_seq, 0
 
     def __len__(self):
         return len(self.video_info)

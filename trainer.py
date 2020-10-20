@@ -10,6 +10,7 @@ import losses
 import random
 from utils.utils import save_checkpoint, AverageMeter
 
+from hurry.filesize import size
 torch.autograd.set_detect_anomaly(True)
 
 
@@ -78,7 +79,6 @@ class Trainer:
                     break
                 # Measure data loading time
                 avg_meters['data_time'].update(time.time() - time_last)
-
                 input_seq = input_seq.to(self.args.device)
                 labels = labels.to(self.args.device)
 

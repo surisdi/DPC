@@ -5,12 +5,12 @@ from utils.hyp_cone import HypConeDist
 import copy
 import numpy as np
 
-from hurry.filesize import size
 from utils.poincare_distance import poincare_distance
+
 
 def compute_loss(args, score, pred, labels, target, sizes, B):
 
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
         results, loss = compute_selfsupervised_loss(args, score, target, sizes, B)
@@ -117,7 +117,7 @@ def compute_selfsupervised_loss(args, score, target, sizes, B):
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         return None  # No need to compute scores
 
     last_size, size_gt, size_pred = sizes.cpu().numpy()
@@ -167,7 +167,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
 
 def compute_mask(args, sizes, B):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         return None, None  # No need to compute mask
 
     last_size, size_gt, size_pred = sizes
@@ -206,7 +206,7 @@ def compute_mask(args, sizes, B):
 
 
 def bookkeeping(args, avg_meters, results):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         accuracy, hier_accuracy, loss, B = results
         avg_meters['losses'].update(loss, B)
         avg_meters['accuracy'].update(accuracy, B)

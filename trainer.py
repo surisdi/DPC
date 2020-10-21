@@ -10,7 +10,6 @@ import losses
 import random
 from utils.utils import save_checkpoint, AverageMeter
 
-from hurry.filesize import size
 torch.autograd.set_detect_anomaly(True)
 
 

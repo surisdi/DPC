@@ -141,7 +141,7 @@ class AccuracyTable(object):
                 % (label, key, self.dict[key]['correct'], self.dict[key]['count'], acc))
 
 
-def neq_load_customized(model, pretrained_dict, parts = ['backbone', 'agg', 'network_pred']):
+def neq_load_customized(model, pretrained_dict, parts=['backbone', 'agg', 'network_pred']):
     ''' load pre-trained model in a not-equal way,
     when new model has been partially modified '''
     model_dict = model.state_dict()
@@ -165,16 +165,11 @@ def neq_load_customized(model, pretrained_dict, parts = ['backbone', 'agg', 'net
                 if k not in pretrained_dict:
                     print(k)
         print('===================================\n')
-    
-    
-    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-    
-    
-    
+
     del pretrained_dict
     model_dict.update(tmp)
     del tmp
-    model.load_state_dict(model_dict)
+    model.load_state_dict(model_dict, strict=False)
     return model
             
             

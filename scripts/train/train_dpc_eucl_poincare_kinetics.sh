@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# This is the number 03 in the list
+# This is the number 01 in the list
 CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \

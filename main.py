@@ -33,51 +33,53 @@ def print_r(args, text):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    # Task definition
-    parser.add_argument('--pred_step', default=3, type=int, help='How subclips to predict')
+
+    parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
+    # Model
     parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
     parser.add_argument('--hyperbolic_version', default=1, type=int)
+    parser.add_argument('--resume', default='', type=str, help='path of model to resume')
+    parser.add_argument('--pretrain', default='', type=str,
+                        help='path of pretrained model. Difference with resume is that we start a completely new '
+                             'training and checkpoint, do not load optimizer, and model loading is not strict')
+    parser.add_argument('--only_train_linear', action='store_true',
+                        help='Only train last linear layer. Only used (only makes sense) if pretrain is used.')
+    parser.add_argument('--linear_input', default='features', type=str, help='Input to the last linear layer',
+                        choices=['features_z', 'predictions_c', 'predictions_z_hat'])
+    parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
+    # Loss
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
-    parser.add_argument('--pretrain', default='', type=str, help='path of pretrained model')
     parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
+    parser.add_argument('--pred_step', default=3, type=int, help='How subclips to predict')
+    parser.add_argument('--cross_gpu_score', action='store_true',
+                        help='Compute the score matrix using as negatives samples from different GPUs')
     parser.add_argument('--hierarchical_labels', action='store_true',
                         help='Works both for training with labels and for testing the accuracy')
     parser.add_argument('--test', action='store_true', help='Test system')
-    # Eval info
-    parser.add_argument('--finetune', action='store_true', help='Finetune model')
-    parser.add_argument('--finetune_all', action='store_true',
-                        help='Finetune all model. If False, only train the linear layer. Only used if finetune=True')
-    parser.add_argument('--finetune_path', default='', type=str, help='path of pretrained model')
-    parser.add_argument('--finetune_input', default='features', type=str, help='Input to the last linear layer',
-                        choices=['features_z', 'predictions_c', 'predictions_z_hat'])
-    # Network
-    parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
     # Data
     parser.add_argument('--dataset', default='ucf101', type=str)
     parser.add_argument('--seq_len', default=5, type=int, help='number of frames in each video block')
     parser.add_argument('--num_seq', default=8, type=int, help='number of video blocks')
     parser.add_argument('--ds', default=3, type=int, help='frame downsampling rate')
     parser.add_argument('--n_classes', default=0, type=int)
-    parser.add_argument('--return_label', action='store_true', help='return labels')
+    parser.add_argument('--use_labels', action='store_true', help='return labels in dataset and use supervised loss')
     parser.add_argument('--action_level_gt', action='store_true',
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
+    parser.add_argument('--img_dim', default=128, type=int)
     # Optimization
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--wd', default=1e-5, type=float, help='weight decay')
-    # Other
-    parser.add_argument('--resume', default='', type=str, help='path of model to resume')
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run')
     parser.add_argument('--start_epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
-    parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
+    # Other
+    parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
     parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
-    parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
-    parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--seed', type=int, default=0, help='Random seed for initialization')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
     parser.add_argument('--fp16', action='store_true', help='Whether to use 16-bit float precision instead of 32-bit. '
@@ -87,21 +89,24 @@ def get_args():
                                                                   'Can be combined with --fp16')
     parser.add_argument('--num_workers', default=32, type=int, help='number of workers for dataloader')
 
-    parser.add_argument('--cross_gpu_score', action='store_true',
-                        help='Compute the score matrix using as negatives samples from different GPUs')
+
 
     args = parser.parse_args()
 
     if args.early_action_self:
         assert args.early_action, 'Read the explanation'
         assert args.pred_step == 1, 'We only want to predict the last one'
-    elif args.early_action or args.finetune:
+
+    if args.use_labels:
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
 
-    if args.finetune and args.early_action:
+    if args.early_action:
         assert args.action_level_gt, 'Early action recognition implies only action level, not subaction level'
+
+    if args.early_action and not args.early_action_self:
+        assert args.use_labels
 
     return args
 
@@ -151,7 +156,7 @@ def main():
             args.start_epoch = checkpoint['epoch']
             iteration = checkpoint['iteration']
             best_acc = checkpoint['best_acc']
-            model.load_state_dict(checkpoint['state_dict'])
+            model.load_state_dict(checkpoint['state_dict'], strict=True)
             scheduler.load_state_dict(checkpoint['scheduler'])
             if not args.reset_lr:  # if didn't reset lr, load old optimizer
                 optimizer.load_state_dict(checkpoint['optimizer'])
@@ -161,39 +166,24 @@ def main():
         else:
             print_r(args, f"[Warning] no checkpoint found at '{args.resume}'")
 
-    if args.finetune:
-        if os.path.isfile(args.finetune_path):
-            print_r(args, f"=> loading pretrained checkpoint '{args.finetune_path}'")
-            checkpoint = torch.load(args.finetune_path, map_location=torch.device('cpu'))
+    elif args.pretrain:  # resume overwrites this
+        if os.path.isfile(args.pretrain):
+            print_r(args, f"=> loading pretrained checkpoint '{args.pretrain}'")
+            checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
             model = neq_load_customized(model, checkpoint['state_dict'], parts=['backbone', 'agg', 'network_pred'])
-            print_r(args, f"=> loaded pretrained checkpoint '{args.finetune_path}' (epoch {checkpoint['epoch']})")
+            print_r(args, f"=> loaded pretrained checkpoint '{args.pretrain}' (epoch {checkpoint['epoch']})")
         else:
-            print_r(args, f"=> no checkpoint found at '{args.finetune_path}'")
+            print_r(args, f"=> no checkpoint found at '{args.pretrain}'")
 
-        if not args.finetune_all:
-            for name, param in model.named_parameters(): # deleted 'module'
+        if args.only_train_linear:
+            for name, param in model.named_parameters():  # deleted 'module'
                 if not 'network_class' in name:
                     param.requires_grad = False
         print('\n==== parameter names and whether they require gradient ====\n')
         for name, param in model.named_parameters():
             print(name, param.requires_grad)
         print('\n==== start dataloading ====\n')
-        
-    if args.hyp_cone:
-        print(args.pretrain)
-        if args.pretrain is not None:
-            print_r(args, f"=> loading pretrained checkpoint for hyperbolic cone '{args.pretrain}'")
-            checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(model, checkpoint['state_dict'], parts=['backbone', 'agg', 'network_pred'])
-            print_r(args, f"=> loaded pretrained checkpoint for hyperbolic cone '{args.pretrain}' (epoch {checkpoint['epoch']})")
-        else:
-            print_r(args, f"=> no checkpoint found at '{args.pretrain}'")
 
-        print('\n==== parameter names and whether they require gradient ====\n')
-        for name, param in model.named_parameters():
-            print(name, param.requires_grad)
-        print('\n==== start dataloading ====\n')
-        
     if args.local_rank != -1:
         from torch.nn.parallel import DistributedDataParallel as DDP
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
@@ -205,10 +195,10 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = datasets.get_data(args, 'train', return_label=args.return_label,
+    train_loader = datasets.get_data(args, 'train', return_label=args.use_labels,
                                      hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
                                      num_workers=args.num_workers)
-    val_loader = datasets.get_data(args, 'val', return_label=args.return_label,
+    val_loader = datasets.get_data(args, 'val', return_label=args.use_labels,
                                    hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
                                    num_workers=args.num_workers)
 

@@ -472,8 +472,8 @@ class FineGym(data.Dataset):
     """
     If we select gym288, the number of classes to predict is:
     - 288 in the subaction level
-    - X in the action level
-    - X in the hierarchical level (288 + X + Y)
+    - 4 in the action level
+    - 307 in the hierarchical level (288 + 15 + 4)
     """
     def __init__(self,
                  mode='train',

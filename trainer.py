@@ -15,7 +15,7 @@ torch.autograd.set_detect_anomaly(True)
 
 class Trainer:
     def __init__(self, args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
-                 img_path, model_path, scheduler, partial=1.0):
+                 img_path, model_path, scheduler):
         self.args = args
         self.model = model
         self.optimizer = optimizer
@@ -28,7 +28,6 @@ class Trainer:
         self.scheduler = scheduler
         self.scaler = GradScaler()
         self.target = self.sizes = None
-        self.partial = partial
 
     def train(self):
         # --- main loop --- #
@@ -71,9 +70,9 @@ class Trainer:
 
         with tqdm(self.loaders['train' if train else 'val'], desc=f'Training epoch {epoch}' if train else
                   f'Evaluating {f"epoch {epoch}" if epoch else ""}', disable=self.args.local_rank > 0,
-                  total=int(len(self.loaders['train' if train else 'val']) * (self.partial if train else 1.0))) as t:
+                  total=int(len(self.loaders['train' if train else 'val']) * (self.args.partial if train else 1.0))) as t:
             for idx, (input_seq, labels) in enumerate(t):
-                stop = int(len(self.loaders['train' if train else 'val']) * (self.partial if train else 1.0))
+                stop = int(len(self.loaders['train' if train else 'val']) * (self.args.partial if train else 1.0))
                 if idx >= stop:
                     break
                 # Measure data loading time

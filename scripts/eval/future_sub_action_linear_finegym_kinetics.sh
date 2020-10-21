@@ -24,7 +24,6 @@ main.py \
 --fp64_hyper \
 --pretrain logs/log_train_dpc_hyper_v1_poincare_kinetics/20201019_195227/model/model_best_epoch78.pth.tar \
 --linear_input predictions_z_hat \
---action_level_gt \
 --n_classes 307 \
 --hierarchical_labels \
 --use_labels \

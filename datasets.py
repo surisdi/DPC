@@ -543,25 +543,26 @@ class FineGym(data.Dataset):
                 clips.append(file.replace('.mp4', ''))
 
         self.subclipidx2label = {}
-        clips_in_labels = []  # Some clips in "clips" may belong to another split or not even be in the *element.txt
+        clips_in_labels = set()  # Some clips in "clips" may belong to another split or not even be in the *element.txt
         with open(os.path.join(path_dataset, path_labels), 'r') as f:
             for line in f:
                 data_split = line.replace('\n', '').split()
                 subclip_name = data_split[0]
                 self.subclipidx2label[subclip_name] = int(data_split[1])
                 clip_name = subclip_name[:27]
-                clips_in_labels.append(clip_name)
+                clips_in_labels.add(clip_name)
 
         self.clips = {}  # Actual clips used in the dataset, with its actions
         for clip in clips:
-            if self.return_label and clip not in clips_in_labels:
+            if self.return_label and clip not in clips_in_labels:  # For gym288, this filters out almost 2/3 of the data
                 continue
             assert len(clip) == 27  # youtube ID is 11, event ID is 15, and the separation
             video_id = clip[:11]
             event_id = clip[12:]
             segments = self.annotations[video_id][event_id]['segments']
             if segments is not None and (
-                    len(segments) >= self.num_seq if self.return_label else  # This is filtering several short videos
+                    # This is filtering out several short videos, approx 1/3 of the remaining videos for self.num_seq=6
+                    len(segments) >= self.num_seq if self.return_label else
                     np.array([s['stages'] for s in segments.values()]).sum() >= self.num_seq):
                 if np.array([s['stages'] > 1 for s in segments.values()]).any() and not self.return_label:
                     segments = {k1 + f'_{i}': {'timestamps': v1['timestamps'][i]} for k1, v1 in segments.items()
@@ -754,6 +755,7 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                             downsample=args.ds,
                             return_label=return_label)
     elif args.dataset == 'hollywood2':
+        assert action_level_gt, 'hollywood2 does not have subaction labels'
         dataset = Hollywood2(mode=mode,
                              transform=transform,
                              seq_len=args.seq_len,
@@ -762,6 +764,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                              return_label=return_label,
                              hierarchical_label=hierarchical_label)
     elif args.dataset == 'finegym':
+        if hierarchical_label:
+            assert not action_level_gt, 'finegym does not have hierarchical information at the action level'
         dataset = FineGym(mode=mode,
                           transform=transform,
                           seq_len=args.seq_len,

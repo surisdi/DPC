@@ -42,7 +42,7 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
                 gt = labels.view(-1).to(args.device)
         else:  # Option 1
             gt = labels.to(args.device)
-        loss = torch.nn.functional.cross_entropy(pred, gt)
+        loss = torch.nn.functional.cross_entropy(pred, gt, ignore_index=-1)
         accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
 
     else:
@@ -56,11 +56,14 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
         else:  # Options 2
             labels = labels.to(args.device)
 
+        pred = pred[labels[:, 0] != -1]
+        labels = labels[labels[:, 0] != -1]
+
         gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
         indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
         gt[indices, labels] = 1
 
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt)  # CE loss with logit as ground truth
+        loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
         accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
         hier_accuracy = 0
         reward = 1
@@ -74,7 +77,7 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
                 hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
                 reward = reward / 2
 
-    results = accuracy, hier_accuracy, loss.item() / args.num_seq
+    results = accuracy, hier_accuracy, loss.item()
     return results, loss
 
 
@@ -209,8 +212,8 @@ def bookkeeping(args, avg_meters, results):
     if args.use_labels:
         accuracy, hier_accuracy, loss, B = results
         avg_meters['losses'].update(loss, B)
-        avg_meters['accuracy'].update(accuracy, B)
-        avg_meters['hier_accuracy'].update(hier_accuracy, B)
+        avg_meters['accuracy'].update(accuracy.float(), B)
+        avg_meters['hier_accuracy'].update(hier_accuracy.float(), B)
     else:
         if args.hyp_cone:
             pos_acc, neg_acc, loss, B = results

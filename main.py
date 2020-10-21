@@ -62,23 +62,24 @@ def get_args():
     parser.add_argument('--test', action='store_true', help='Test system')
     # Data
     parser.add_argument('--dataset', default='ucf101', type=str)
-    parser.add_argument('--seq_len', default=5, type=int, help='number of frames in each video block')
-    parser.add_argument('--num_seq', default=8, type=int, help='number of video blocks')
-    parser.add_argument('--ds', default=3, type=int, help='frame downsampling rate')
+    parser.add_argument('--seq_len', default=5, type=int, help='Number of frames in each video block')
+    parser.add_argument('--num_seq', default=8, type=int, help='Number of video blocks')
+    parser.add_argument('--ds', default=3, type=int, help='Frame downsampling rate')
     parser.add_argument('--n_classes', default=0, type=int)
-    parser.add_argument('--use_labels', action='store_true', help='return labels in dataset and use supervised loss')
+    parser.add_argument('--use_labels', action='store_true', help='Return labels in dataset and use supervised loss')
     parser.add_argument('--action_level_gt', action='store_true',
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     parser.add_argument('--img_dim', default=128, type=int)
-    # Optimization
+    # Training
     parser.add_argument('--batch_size', default=4, type=int)
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--wd', default=1e-5, type=float, help='weight decay')
-    parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run')
-    parser.add_argument('--start_epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
+    parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
+    parser.add_argument('--wd', default=1e-5, type=float, help='Weight decay')
+    parser.add_argument('--epochs', default=10, type=int, help='Number of total epochs to run')
+    parser.add_argument('--start_epoch', default=0, type=int, help='Manual epoch number (useful on restarts)')
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
+    parser.add_argument('--partial',  default=1., type=float, help='Percentage of training set to use')
     # Other
-    parser.add_argument('--print_freq', default=5, type=int, help='frequency of printing output during training')
+    parser.add_argument('--print_freq', default=5, type=int, help='Frequency of printing output during training')
     parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
     parser.add_argument('--seed', type=int, default=0, help='Random seed for initialization')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
@@ -105,6 +106,9 @@ def get_args():
 
     if args.early_action and not args.early_action_self:
         assert args.use_labels
+
+    if args.action_level_gt:
+        assert args.linear_input != 'features_z', 'We cannot get a representation for the whole clip with features_z'
 
     return args
 
@@ -209,7 +213,7 @@ def main():
     if args.local_rank <= 0:
         print('Preparing trainer')
     trainer = Trainer(args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
-                      img_path, model_path, scheduler, partial=0.1)
+                      img_path, model_path, scheduler)
 
     if args.test:
         trainer.test()

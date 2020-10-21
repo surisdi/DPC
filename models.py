@@ -134,11 +134,11 @@ class Model(nn.Module):
             feature += self.time_index(torch.range(0, feature.shape[1]-1).long().to('cuda'))[None, :, :, None, None]
 
         hidden_all, hidden = self.agg(feature[:, 0:N-self.args.pred_step, :].contiguous())
-        hidden = hidden[:, -1, :] # after tanh, (-1,1). get the hidden state of last layer, last time step
+        hidden = hidden[:, -1, :]  # after tanh, (-1,1). get the hidden state of last layer, last time step
 
         if self.args.use_labels:
             if self.args.linear_input == 'features_z':
-                input_linear = feature_predict_from.mean(dim=[-2, -1])   # pool only spatially
+                input_linear = feature_predict_from.mean(dim=[-2, -1])   # just pool spatially
             elif self.args.linear_input == 'predictions_c':
                 input_linear = hidden_all.mean(dim=[-2, -1])  # just pool spatially
             else:  # 'predictions_z_hat'
@@ -146,7 +146,11 @@ class Model(nn.Module):
                 hidden_all_projected = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).\
                     view_as(hidden_all)
                 input_linear = hidden_all_projected.mean(dim=[-2, -1])  # just pool spatially
-            input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
+            if self.args.action_level_gt and not self.args.early_action:
+                # if we use features_z, this is only using the last one. But an assert in main.py controls for that
+                input_linear = input_linear[:, -1]
+            else:
+                input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
             # Predict label supervisedly
             if self.args.hyperbolic:
                 feature_shape = input_linear.shape

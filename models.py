@@ -142,7 +142,9 @@ class Model(nn.Module):
             elif self.args.linear_input == 'predictions_c':
                 input_linear = hidden_all.mean(dim=[-2, -1])  # just pool spatially
             else:  # 'predictions_z_hat'
-                hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
+                # project to "features" space
+                hidden_all_projected = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).\
+                    view_as(hidden_all)
                 input_linear = hidden_all_projected.mean(dim=[-2, -1])  # just pool spatially
             input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
             # Predict label supervisedly

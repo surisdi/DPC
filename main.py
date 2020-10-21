@@ -89,8 +89,6 @@ def get_args():
                                                                   'Can be combined with --fp16')
     parser.add_argument('--num_workers', default=32, type=int, help='number of workers for dataloader')
 
-
-
     args = parser.parse_args()
 
     if args.early_action_self:

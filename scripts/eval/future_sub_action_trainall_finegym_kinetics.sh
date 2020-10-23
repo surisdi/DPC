@@ -22,7 +22,7 @@ main.py \
 --prefix future_sub_action_trainall_finegym_kinetics \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_train_dpc_hyper_v1_poincare_kinetics/20201019_195227/model/model_best_epoch78.pth.tar \
+--pretrain logs/log_train_dpc_hyper_v1_poincare_kinetics/20201019_195227/model/model_best_epoch159.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \

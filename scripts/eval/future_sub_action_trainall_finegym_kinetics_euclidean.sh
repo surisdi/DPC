@@ -24,5 +24,4 @@ main.py \
 --hierarchical_labels \
 --use_labels \
 --num_workers 12 \
---resume logs/log_future_sub_action_trainall_finegym_kinetics_euclidean/20201022_150239/model/model_best_epoch99.pth.tar
 #--cross_gpu_score  Only needed when training with contrastive loss

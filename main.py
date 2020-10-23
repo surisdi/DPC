@@ -96,11 +96,9 @@ def get_args():
 
     assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
 
-    if args.early_action:
-        assert args.action_level_gt, 'Early action recognition implies only action level, not subaction level'
-
     if args.early_action and not args.early_action_self:
         assert args.use_labels
+        assert args.action_level_gt, 'Early action recognition implies only action level, not subaction level'
 
     if args.action_level_gt:
         assert args.linear_input != 'features_z', 'We cannot get a representation for the whole clip with features_z'

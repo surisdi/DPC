@@ -145,9 +145,9 @@ def compute_scores(args, pred, feature_dist, sizes, B):
             '''
             replacing geoopt distance
             '''
-#             manif = geoopt.manifolds.PoincareBall(c=1)
-#             score = manif.dist(pred_expand, gt_expand)
-#             score = manif.dist(pred_expand.float(), gt_expand.float())
+            # manif = geoopt.manifolds.PoincareBall(c=1)
+            # score = manif.dist(pred_expand, gt_expand)
+            # score = manif.dist(pred_expand.float(), gt_expand.float())
             score = poincare_distance(pred, feature_dist)
             if args.distance == 'squared':
                 score = score.pow(2)

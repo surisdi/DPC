@@ -4,7 +4,7 @@ import geoopt
 from utils.hyp_cone import HypConeDist
 import copy
 import numpy as np
-
+from datasets import sizes_hierarchy as sh
 from utils.poincare_distance import poincare_distance
 
 
@@ -19,7 +19,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
     return to_return
 
 
-def compute_supervised_loss(args, pred, labels, B, top_down=False):
+def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_levels=True):
     """
     Six options to predict:
     1. Predict a single label for each sample (clip). Both num of labels and prediction size are equal to batch size
@@ -64,18 +64,15 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
         gt[indices, labels] = 1
 
         loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
-        accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
+        accuracy = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float().mean()
         hier_accuracy = 0
         reward = 1
-        # reward value decay by 50% per level going up
-        if top_down:
-            for i in reversed(range(labels.size(1))):
-                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                reward = reward / 2
-        else:
-            for i in range(labels.size(1)):
-                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                reward = reward / 2
+        # reward value decay by 50% per level going up (or down)
+        for i in (reversed if top_down else lambda x: x)(range(labels.size(1))):
+            init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum()) \
+                if separate_levels else (0, sh[args.dataset][0])
+            hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) == labels[:, i]).float().mean() * reward)
+            reward = reward / 2
 
     results = accuracy, hier_accuracy, loss.item()
     return results, loss

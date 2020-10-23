@@ -15,6 +15,13 @@ from utils import augmentation
 import re
 
 
+# Hardcoded for now. TODO make cleaner
+sizes_hierarchy = {
+    'finegym': (307, [288, 15, 4]),
+    'hollywood2': (17, [12, 5])
+}
+
+
 def pil_loader(path):
     try:
         with open(path, 'rb') as f:
@@ -606,7 +613,7 @@ class FineGym(data.Dataset):
                 padding[5] = self.seq_len - video_transformed.shape[1]
                 video_padded = torch.nn.functional.pad(video_transformed, pad=padding, mode="constant", value=0)
             else:
-                print(f'{path_clip} is not a valid file')
+                # print(f'{path_clip} is not a valid file')
                 video_padded = torch.zeros((3, self.seq_len, 80, 80))
             total_clip.append(video_padded)
 

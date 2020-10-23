@@ -1,15 +1,13 @@
 import torch
 import numpy as np
-import pickle
 import os
 from datetime import datetime
 import glob
-import re
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 from collections import deque
-from tqdm import tqdm 
 from torchvision import transforms
+
 
 def save_checkpoint(state, is_best=0, gap=1, filename='models/checkpoint.pth.tar', keep_all=False):
     torch.save(state, filename)
@@ -23,7 +21,10 @@ def save_checkpoint(state, is_best=0, gap=1, filename='models/checkpoint.pth.tar
         for i in past_best:
             try: os.remove(i)
             except: pass
-        torch.save(state, os.path.join(os.path.dirname(filename), 'model_best_epoch%s.pth.tar' % str(state['epoch'])))
+        path_best = os.path.join(os.path.dirname(filename), 'model_best_epoch%s.pth.tar' % str(state['epoch']))
+        torch.save(state, path_best)
+        print(f'Updating best model: {path_best}')
+
 
 def write_log(content, epoch, filename):
     if not os.path.exists(filename):
@@ -34,6 +35,7 @@ def write_log(content, epoch, filename):
     log_file.write('time: %s\n' % str(datetime.now()))
     log_file.write(content + '\n\n')
     log_file.close()
+
 
 def calc_topk_accuracy(output, target, topk=(1,)):
     '''
@@ -54,11 +56,13 @@ def calc_topk_accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(1 / batch_size))
     return res
 
+
 def calc_accuracy(output, target):
     '''output: (B, N); target: (B)'''
     target = target.squeeze()
     _, pred = torch.max(output, 1)
     return torch.mean((pred == target).float())
+
 
 def calc_accuracy_binary(output, target):
     '''output, target: (B, N), output is logits, before sigmoid '''
@@ -66,6 +70,7 @@ def calc_accuracy_binary(output, target):
     acc = torch.mean((pred == target.byte()).float())
     del pred, output, target
     return acc
+
 
 def denorm(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
     assert len(mean)==len(std)==3
@@ -141,36 +146,49 @@ class AccuracyTable(object):
                 % (label, key, self.dict[key]['correct'], self.dict[key]['count'], acc))
 
 
-def neq_load_customized(model, pretrained_dict, parts=['backbone', 'agg', 'network_pred']):
+def neq_load_customized(args, model, pretrained_dict,
+                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class']):
     ''' load pre-trained model in a not-equal way,
     when new model has been partially modified '''
     model_dict = model.state_dict()
     tmp = {}
-    print('\n=======Check Weights Loading======')
-    print('loading the following parts:', ', '.join(parts))
-    for part in parts:
-        print('loading:', part)
-        print('\n=======Check Weights Loading======')
-        print('Weights not used from pretrained file:')
-        for k, v in pretrained_dict.items():
-            if part in k:
-                if k in model_dict:
-                    tmp[k] = v
-                else:
-                    print(k)
-        print('---------------------------')
-        print('Weights not loaded into new model:')
-        for k, v in model_dict.items():
-            if part in k:
-                if k not in pretrained_dict:
-                    print(k)
-        print('===================================\n')
+    print_r(args, '\n=======Check Weights Loading======')
+    print_r(args, ('loading the following parts:', ', '.join(parts)))
+    if parts == 'all':
+        tmp = pretrained_dict
+    else:
+        for part in parts:
+            print_r(args, ('loading:', part))
+            print_r(args, '\n=======Check Weights Loading======')
+            print_r(args, 'Weights not used from pretrained file:')
+            for k, v in pretrained_dict.items():
+                if part in k:
+                    if k in model_dict:
+                        tmp[k] = v
+                    else:
+                        print_r(args, k)
+            print_r(args, '---------------------------')
+            print_r(args, 'Weights not loaded into new model:')
+            for k, v in model_dict.items():
+                if part in k:
+                    if k not in pretrained_dict:
+                        print_r(args, k)
+            print_r(args, '===================================\n')
 
     del pretrained_dict
     model_dict.update(tmp)
     del tmp
     model.load_state_dict(model_dict, strict=False)
     return model
+
+
+def print_r(args, text, print_no_verbose=False):
+    """ Print only when the local rank is <=0 (only once)"""
+    if args.local_rank <= 0 and (args.verbose or print_no_verbose):
+        if type(text) == tuple:
+            print(*text)
+        else:
+            print(text)
             
             
 class ConfusionMeter(object):

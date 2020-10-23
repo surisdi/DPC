@@ -18,17 +18,11 @@ from torchvision import datasets, models
 import datasets
 import models
 from trainer import Trainer
-from utils.utils import neq_load_customized
+from utils.utils import neq_load_customized, print_r
 
 plt.switch_backend('agg')
 
 torch.backends.cudnn.benchmark = True
-
-
-def print_r(args, text):
-    """ Print only when the local rank is <=0 (only once)"""
-    if args.local_rank <= 0:
-        print(text)
 
 
 def get_args():
@@ -77,9 +71,10 @@ def get_args():
     parser.add_argument('--epochs', default=10, type=int, help='Number of total epochs to run')
     parser.add_argument('--start_epoch', default=0, type=int, help='Manual epoch number (useful on restarts)')
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
-    parser.add_argument('--partial',  default=1., type=float, help='Percentage of training set to use')
+    parser.add_argument('--partial', default=1., type=float, help='Percentage of training set to use')
     # Other
     parser.add_argument('--print_freq', default=5, type=int, help='Frequency of printing output during training')
+    parser.add_argument('--verbose', action='store_true', help='Print information')
     parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
     parser.add_argument('--seed', type=int, default=0, help='Random seed for initialization')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training on gpus')
@@ -122,7 +117,7 @@ def main():
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    
+
     if args.local_rank == -1:
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         args.n_gpu = args.step_n_gpus = torch.cuda.device_count()
@@ -132,7 +127,7 @@ def main():
         args.n_gpu = 1
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
         args.step_n_gpus = torch.distributed.get_world_size()
-        
+
     # ---------------------------- Prepare model ----------------------------- #
     if args.local_rank <= 0:
         print_r(args, 'Preparing model')
@@ -144,15 +139,12 @@ def main():
     optimizer = geoopt.optim.RiemannianAdam(params, lr=args.lr, weight_decay=args.wd, stabilize=10)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 150], gamma=0.1)
 
-    args.old_lr = None
-
     best_acc = 0
     iteration = 0
 
     # --- restart training --- #
     if args.resume:
         if os.path.isfile(args.resume):
-            args.old_lr = float(re.search('_lr(.+?)_', args.resume.split('/')[-3]).group(1))
             print_r(args, f"=> loading resumed checkpoint '{args.resume}'")
             checkpoint = torch.load(args.resume, map_location=torch.device('cpu'))
             args.start_epoch = checkpoint['epoch']
@@ -163,7 +155,7 @@ def main():
             if not args.reset_lr:  # if didn't reset lr, load old optimizer
                 optimizer.load_state_dict(checkpoint['optimizer'])
             else:
-                print_r(args, f'==== Change lr from {args.old_lor} to {args.lr} ====')
+                print_r(args, f'==== Restart optimizer with a learning rate {args.lr} ====')
             print_r(args, f"=> loaded resumed checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
         else:
             print_r(args, f"[Warning] no checkpoint found at '{args.resume}'")
@@ -172,19 +164,19 @@ def main():
         if os.path.isfile(args.pretrain):
             print_r(args, f"=> loading pretrained checkpoint '{args.pretrain}'")
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(model, checkpoint['state_dict'], parts=['backbone', 'agg', 'network_pred'])
+            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all')
             print_r(args, f"=> loaded pretrained checkpoint '{args.pretrain}' (epoch {checkpoint['epoch']})")
         else:
-            print_r(args, f"=> no checkpoint found at '{args.pretrain}'")
+            print_r(args, f"=> no checkpoint found at '{args.pretrain}'", print_no_verbose=True)
 
         if args.only_train_linear:
             for name, param in model.named_parameters():  # deleted 'module'
                 if not 'network_class' in name:
                     param.requires_grad = False
-        print('\n==== parameter names and whether they require gradient ====\n')
+        print_r(args, '\n==== parameter names and whether they require gradient ====\n')
         for name, param in model.named_parameters():
-            print(name, param.requires_grad)
-        print('\n==== start dataloading ====\n')
+            print_r(args, (name, param.requires_grad))
+        print_r(args, '\n==== start dataloading ====\n')
 
     if args.local_rank != -1:
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -197,23 +189,25 @@ def main():
         args.parallel = 'none'
 
     # ---------------------------- Prepare dataset ----------------------------- #
-    train_loader = datasets.get_data(args, 'train', return_label=args.use_labels,
+    splits = ['train', 'val', 'test']
+    loaders = {split:
+                   datasets.get_data(args, split, return_label=args.use_labels,
                                      hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
                                      num_workers=args.num_workers)
-    val_loader = datasets.get_data(args, 'val', return_label=args.use_labels,
-                                   hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
-                                   num_workers=args.num_workers)
+               for split in splits}
 
     # setup tools
     img_path, model_path = set_path(args)
-    writer_val = SummaryWriter(log_dir=os.path.join(img_path, 'val') if not args.debug else '/tmp') if args.local_rank <= 0 else None
-    writer_train = SummaryWriter(log_dir=os.path.join(img_path, 'train') if not args.debug else '/tmp') if args.local_rank <= 0 else None
+    writer_val = SummaryWriter(
+        log_dir=os.path.join(img_path, 'val') if not args.debug else '/tmp') if args.local_rank <= 0 else None
+    writer_train = SummaryWriter(
+        log_dir=os.path.join(img_path, 'train') if not args.debug else '/tmp') if args.local_rank <= 0 else None
 
     # ---------------------------- Prepare trainer and run ----------------------------- #
     if args.local_rank <= 0:
-        print('Preparing trainer')
-    trainer = Trainer(args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
-                      img_path, model_path, scheduler)
+        print_r(args, 'Preparing trainer')
+    trainer = Trainer(args, model, optimizer, loaders, iteration, best_acc, writer_train, writer_val, img_path,
+                      model_path, scheduler)
 
     if args.test:
         trainer.test()
@@ -229,7 +223,7 @@ def set_path(args):
         exp_path = f"logs/log_{args.prefix}/{current_time}"
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
-    if args.local_rank <= 0:
+    if args.local_rank <= 0 and not args.resume:
         os.makedirs(img_path)
         os.makedirs(model_path)
     return img_path, model_path

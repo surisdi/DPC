@@ -14,12 +14,12 @@ torch.autograd.set_detect_anomaly(True)
 
 
 class Trainer:
-    def __init__(self, args, model, optimizer, train_loader, val_loader, iteration, best_acc, writer_train, writer_val,
+    def __init__(self, args, model, optimizer, loaders, iteration, best_acc, writer_train, writer_val,
                  img_path, model_path, scheduler):
         self.args = args
         self.model = model
         self.optimizer = optimizer
-        self.loaders = {'train': train_loader, 'val': val_loader}
+        self.loaders = loaders
         self.iteration = iteration
         self.best_acc = best_acc
         self.writers = {'train': writer_train, 'val': writer_val}
@@ -52,8 +52,9 @@ class Trainer:
 
     def test(self):
         accuracies_test = self.run_epoch(epoch=None, train=False)
-        print('Accuracies test:')
-        print(accuracies_test)
+        if self.args.local_rank <= 0:
+            print('Accuracies test:')
+            print(accuracies_test)
 
     def run_epoch(self, epoch, train=True, return_all_acc=False):
         if self.args.device == "cuda":
@@ -68,12 +69,12 @@ class Trainer:
 
         time_last = time.time()
 
-        with tqdm(self.loaders['train' if train else 'val'], desc=f'Training epoch {epoch}' if train else
-                  f'Evaluating {f"epoch {epoch}" if epoch else ""}', disable=self.args.local_rank > 0,
-                  total=int(len(self.loaders['train' if train else 'val']) * (self.args.partial if train else 1.0))) as t:
+        loader = self.loaders['train' if train else ('val' if epoch is not None else 'test')]
+        desc = f'Training epoch {epoch}' if train else (f'Evaluating epoch {epoch}' if epoch is not None else 'Testing')
+        stop_total = int(len(loader) * (self.args.partial if train else 1.0))
+        with tqdm(loader, desc=desc, disable=self.args.local_rank > 0, total=stop_total) as t:
             for idx, (input_seq, labels) in enumerate(t):
-                stop = int(len(self.loaders['train' if train else 'val']) * (self.args.partial if train else 1.0))
-                if idx >= stop:
+                if idx >= stop_total:
                     break
                 # Measure data loading time
                 avg_meters['data_time'].update(time.time() - time_last)
@@ -105,8 +106,7 @@ class Trainer:
                     else:
                         loss, results = output_model
                     losses.bookkeeping(self.args, avg_meters, results)
-                
-                    
+
                 del input_seq
 
                 if train:

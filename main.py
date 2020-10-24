@@ -145,7 +145,7 @@ def main():
     # --- restart training --- #
     if args.resume:
         if os.path.isfile(args.resume):
-            args.old_lr = float(re.search('_lr(.+?)_', args.resume.split('/')[-3]).group(1))
+#             args.old_lr = float(re.search('_lr(.+?)_', args.resume.split('/')[-3]).group(1))
             print_r(args, f"=> loading resumed checkpoint '{args.resume}'")
             checkpoint = torch.load(args.resume, map_location=torch.device('cpu'))
             args.start_epoch = checkpoint['epoch']
@@ -238,8 +238,10 @@ def set_path(args):
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
     if args.local_rank <= 0:
-        os.makedirs(img_path)
-        os.makedirs(model_path)
+        if not os.path.exists(img_path):
+            os.makedirs(img_path)
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
     return img_path, model_path
 
 

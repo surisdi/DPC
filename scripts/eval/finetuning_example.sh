@@ -21,10 +21,9 @@ main.py \
 --prefix finetune_example \
 --fp16 \
 --fp64_hyper \
---finetune \
---finetune_path logs/log_hyperbolic_hollywood2_v1_earlyaction_selfsupervised_squared_lr3/20200920_102921/model/epoch600.pth.tar \
---finetune_input predictions \
+--pretrain logs/log_hyperbolic_hollywood2_v1_earlyaction_selfsupervised_squared_lr3/20200920_102921/model/epoch600.pth.tar \
+--linear_input predictions \
 --action_level_gt \
---n_classes 288
+--n_classes 288 \
+--only_train_linear
 
-#--finetune_all False \

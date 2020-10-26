@@ -61,32 +61,12 @@ class Model(nn.Module):
                            kernel_size=1,
                            num_layers=self.param['num_layers'])
 
-        if args.finetune or (args.early_action and not args.early_action_self):
+        if args.use_labels:
             if args.hyperbolic:
-                self.network_class = nn.Sequential(
-                                        MobiusLinear(self.param['feature_size'], self.param['feature_size'],
-                                                  hyperbolic_input=True,
-                                                  hyperbolic_bias=True,
-                                                  nonlin=nn.ReLU(inplace=True),  # For now
-                                                  fp64_hyper=args.fp64_hyper
-                                                  ),
-                                        MobiusLinear(self.param['feature_size'], self.param['feature_size'],
-                                                  hyperbolic_input=True,
-                                                  hyperbolic_bias=True,
-                                                  nonlin=None,  # For now
-                                                  fp64_hyper=args.fp64_hyper
-                                                  ),
-                                        MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
-                    
-                                        )
+                self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
             else:
-#                 self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
-                self.network_class = nn.Sequential(
-                                        nn.Linear(self.param['feature_size'], self.param['feature_size']),
-                                        nn.ReLU(inplace=True),
-                                        nn.Linear(self.param['feature_size'], args.n_classes)
-                                        )
-        else:
+                self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
+        if not args.use_labels or self.args.linear_input == 'predictions_z_hat':
             self.network_pred = nn.Sequential(
                                     nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0),
                                     nn.ReLU(inplace=True),
@@ -154,17 +134,23 @@ class Model(nn.Module):
             feature += self.time_index(torch.range(0, feature.shape[1]-1).long().to('cuda'))[None, :, :, None, None]
 
         hidden_all, hidden = self.agg(feature[:, 0:N-self.args.pred_step, :].contiguous())
-        hidden = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
+        hidden = hidden[:, -1, :]  # after tanh, (-1,1). get the hidden state of last layer, last time step
 
-        if self.args.finetune or (self.args.early_action and not self.args.early_action_self):
-            if self.args.finetune and self.args.finetune_input == 'features_z':
-                input_linear = feature_predict_from.mean(dim=[-2, -1])   # pool only spatially
-            elif self.args.finetune and self.args.finetune_input == 'predictions_c':
+        if self.args.use_labels:
+            if self.args.linear_input == 'features_z':
+                input_linear = feature_predict_from.mean(dim=[-2, -1])   # just pool spatially
+            elif self.args.linear_input == 'predictions_c':
                 input_linear = hidden_all.mean(dim=[-2, -1])  # just pool spatially
             else:  # 'predictions_z_hat'
-                hidden_all_projected = self.network_pred(hidden_all)  # project to "features" space
+                # project to "features" space
+                hidden_all_projected = self.network_pred(hidden_all.view([-1] + list(hidden.shape[1:]))).\
+                    view_as(hidden_all)
                 input_linear = hidden_all_projected.mean(dim=[-2, -1])  # just pool spatially
-            input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
+            if self.args.action_level_gt and not self.args.early_action:
+                # if we use features_z, this is only using the last one. But an assert in main.py controls for that
+                input_linear = input_linear[:, -1]
+            else:
+                input_linear = input_linear.view(-1, hidden_all.shape[2])  # prepare for linear layer
             # Predict label supervisedly
             if self.args.hyperbolic:
                 feature_shape = input_linear.shape

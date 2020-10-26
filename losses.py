@@ -4,13 +4,13 @@ import geoopt
 from utils.hyp_cone import HypConeDist
 import copy
 import numpy as np
-
-from hurry.filesize import size
+from datasets import sizes_hierarchy as sh
 from utils.poincare_distance import poincare_distance
+
 
 def compute_loss(args, score, pred, labels, target, sizes, B):
 
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
         results, loss = compute_selfsupervised_loss(args, score, target, sizes, B)
@@ -19,7 +19,7 @@ def compute_loss(args, score, pred, labels, target, sizes, B):
     return to_return
 
 
-def compute_supervised_loss(args, pred, labels, B, top_down=False):
+def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_levels=True):
     """
     Six options to predict:
     1. Predict a single label for each sample (clip). Both num of labels and prediction size are equal to batch size
@@ -42,7 +42,7 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
                 gt = labels.view(-1).to(args.device)
         else:  # Option 1
             gt = labels.to(args.device)
-        loss = torch.nn.functional.cross_entropy(pred, gt)
+        loss = torch.nn.functional.cross_entropy(pred, gt, ignore_index=-1)
         accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
 
     else:
@@ -56,25 +56,25 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False):
         else:  # Options 2
             labels = labels.to(args.device)
 
+        pred = pred[labels[:, 0] != -1]
+        labels = labels[labels[:, 0] != -1]
+
         gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
         indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
         gt[indices, labels] = 1
 
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, gt)  # CE loss with logit as ground truth
-        accuracy = (torch.argmax(pred, dim=1) == labels[:, 0]).float().mean()
+        loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
+        accuracy = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float().mean()
         hier_accuracy = 0
         reward = 1
-        # reward value decay by 50% per level going up
-        if top_down:
-            for i in reversed(range(labels.size(1))):
-                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                reward = reward / 2
-        else:
-            for i in range(labels.size(1)):
-                hier_accuracy += ((torch.argmax(pred, dim=1) == labels[:, i]).float().mean() * reward)
-                reward = reward / 2
+        # reward value decay by 50% per level going up (or down)
+        for i in (reversed if top_down else lambda x: x)(range(labels.size(1))):
+            init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum()) \
+                if separate_levels else (0, sh[args.dataset][0])
+            hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) == labels[:, i]).float().mean() * reward)
+            reward = reward / 2
 
-    results = accuracy, hier_accuracy, loss.item() / args.num_seq
+    results = accuracy, hier_accuracy, loss.item()
     return results, loss
 
 
@@ -117,7 +117,7 @@ def compute_selfsupervised_loss(args, score, target, sizes, B):
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         return None  # No need to compute scores
 
     last_size, size_gt, size_pred = sizes.cpu().numpy()
@@ -145,9 +145,9 @@ def compute_scores(args, pred, feature_dist, sizes, B):
             '''
             replacing geoopt distance
             '''
-#             manif = geoopt.manifolds.PoincareBall(c=1)
-#             score = manif.dist(pred_expand, gt_expand)
-#             score = manif.dist(pred_expand.float(), gt_expand.float())
+            # manif = geoopt.manifolds.PoincareBall(c=1)
+            # score = manif.dist(pred_expand, gt_expand)
+            # score = manif.dist(pred_expand.float(), gt_expand.float())
             score = poincare_distance(pred, feature_dist)
             if args.distance == 'squared':
                 score = score.pow(2)
@@ -167,7 +167,7 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
 
 def compute_mask(args, sizes, B):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         return None, None  # No need to compute mask
 
     last_size, size_gt, size_pred = sizes
@@ -206,11 +206,11 @@ def compute_mask(args, sizes, B):
 
 
 def bookkeeping(args, avg_meters, results):
-    if args.finetune or (args.early_action and not args.early_action_self):
+    if args.use_labels:
         accuracy, hier_accuracy, loss, B = results
         avg_meters['losses'].update(loss, B)
-        avg_meters['accuracy'].update(accuracy, B)
-        avg_meters['hier_accuracy'].update(hier_accuracy, B)
+        avg_meters['accuracy'].update(accuracy.float(), B)
+        avg_meters['hier_accuracy'].update(hier_accuracy.float(), B)
     else:
         if args.hyp_cone:
             pos_acc, neg_acc, loss, B = results

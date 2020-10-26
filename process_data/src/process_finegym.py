@@ -43,7 +43,7 @@ folder_dataset = '/proj/vondrick/datasets/FineGym'
 # for 'segment' the 'events' have to be already extracted.
 # for 'stage' the 'segments' have to be already extracted (only with events could be enough if there is no case of
 # stages in videos with more than one segment)
-to_extract = 'stage'  # ['event', 'segment', 'stage']
+to_extract = 'segment'  # ['event', 'segment', 'stage']
 
 
 def main():
@@ -103,7 +103,7 @@ def process_video(inputs):
 
 def extract_video(paths_original, paths_new, timestamps):
     for path_original, path_new, timestamp in zip(paths_original, paths_new, timestamps):
-        if os.path.isfile(path_original) and not (os.path.isfile(path_new) and Path(path_new).stat().st_size > 0):
+        if os.path.isfile(path_original) and not (os.path.isfile(path_new) and Path(path_new).stat().st_size > 1000):
             # -y overwrites
             instruction = f'ffmpeg -y -i {path_original} -ss {timestamp[0]} -to {timestamp[1]} -c:v libx264 -c:a copy {path_new}'
             subprocess.call(instruction, shell=True)

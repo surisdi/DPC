@@ -4,7 +4,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9999 \
+--master_port=9998 \
 --nproc_per_node=4 \
 main.py \
 --pred_step 1 \
@@ -16,7 +16,7 @@ main.py \
 --seq_len 5 \
 --num_seq 8 \
 --ds 3 \
---batch_size 16 \
+--batch_size 32 \
 --img_dim 128 \
 --epochs 200 \
 --fp16 \

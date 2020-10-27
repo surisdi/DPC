@@ -10,7 +10,7 @@ main.py \
 --network_feature resnet18 \
 --dataset finegym \
 --batch_size 32 \
---img_dim 80 \
+--img_dim 128 \
 --epochs 100 \
 --hyperbolic \
 --hyperbolic_version 1 \
@@ -19,13 +19,14 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-4 \
---prefix future_sub_action_trainall_finegym_kinetics_lr4 \
+--prefix future_sub_action_trainall_finegym_kinetics_lr4_fromfinetune \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_train_earlyaction_hyper_v1_poincare_kinetics_lr4/20201023_151021/model/model_best_epoch14.pth.tar \
+--pretrain logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym/20201025_164701/model/model_best_epoch114.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \
 --use_labels \
 --num_workers 12 \
+--resume logs/log_future_sub_action_trainall_finegym_kinetics_lr4_fromfinetune/20201026_101428/model/epoch20.pth.tar
 #--cross_gpu_score  Only needed when training with contrastive loss

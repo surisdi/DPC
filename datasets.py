@@ -171,10 +171,10 @@ class Kinetics600_full_3d(data.Dataset):
 
         # splits
         if mode == 'train':
-            split = 'process_data/data/kinetics600/train_split.csv'
+            split = 'process_data/k600/train_split.csv'
             video_info = pd.read_csv(split, header=None)
         elif (mode == 'val') or (mode == 'test'):
-            split = 'process_data/data/kinetics600/val_split.csv'
+            split = 'process_data/k600/val_split.csv'
             video_info = pd.read_csv(split, header=None)
         else:
             raise ValueError('wrong mode')
@@ -208,7 +208,7 @@ class Kinetics600_full_3d(data.Dataset):
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
-        vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+        vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', '//local/vondrick/ruoshi/k600')
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
 

@@ -22,7 +22,7 @@ def square_norm(x):
     Also here we clamp it since it really likes to die to zero.
     """
     norm = torch.norm(x,dim=-1,p=2)**2
-    return torch.clamp(norm,min=1e-5)
+    return torch.clamp(norm, min=1e-5)
 
 
 def pairwise_distances(x, y=None):
@@ -45,4 +45,4 @@ def pairwise_distances(x, y=None):
     # Ensure diagonal is zero if x=y
     # if y is None:
     #     dist = dist - torch.diag(dist.diag)
-    return torch.clamp(dist, 0.0, np.inf)
+    return torch.clamp(dist, 1e-7, np.inf)

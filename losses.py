@@ -2,6 +2,7 @@ import torch
 import utils.utils as utils
 import geoopt
 from utils.hyp_cone import HypConeDist
+from utils.pairwise_hyp_cone import PairwiseHypConeDist
 import copy
 import numpy as np
 from datasets import sizes_hierarchy as sh
@@ -127,17 +128,20 @@ def compute_scores(args, pred, feature_dist, sizes, B):
 
     if args.hyperbolic:
         if args.hyp_cone:
-            shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
-            pred_expand = pred.unsqueeze(1).expand(shape_expand)
-            gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
-            dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
-            reshape_size = (pred.shape[0] * feature_dist.shape[0], pred.shape[1])
-            pred_expand = pred_expand.reshape(reshape_size)
-            gt_expand = gt_expand.reshape(reshape_size)
-            score = dist_fn(pred_expand.float(), gt_expand.float())
+#             dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
+#             shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
+#             pred_expand = pred.unsqueeze(1).expand(shape_expand)
+#             gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
+#             reshape_size = (pred.shape[0] * feature_dist.shape[0], pred.shape[1])
+#             pred_expand = pred_expand.reshape(reshape_size)
+#             gt_expand = gt_expand.reshape(reshape_size)
+#             score = dist_fn(pred_expand.float(), gt_expand.float())
 
-            # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
-            score = score.reshape(B * size_pred * last_size ** 2, B * size_gt * last_size ** 2)
+#             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
+#             score = score.reshape(B * size_pred * last_size ** 2, B * size_gt * last_size ** 2)
+            
+            dist_fn = PairwiseHypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
+            score = dist_fn(pred, feature_dist)
 
         else:
             # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist

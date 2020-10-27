@@ -221,9 +221,11 @@ def set_path(args):
         exp_path = f"logs/log_{args.prefix}/{current_time}"
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
-    if args.local_rank <= 0 and not args.resume:
-        os.makedirs(img_path)
-        os.makedirs(model_path)
+    if args.local_rank <= 0:
+        if not os.path.exists(img_path):
+            os.makedirs(img_path)
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
     return img_path, model_path
 
 

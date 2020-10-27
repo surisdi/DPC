@@ -595,6 +595,7 @@ class FineGym(data.Dataset):
             subclipidx = clipidx + '_' + actions[i]
             subfolder = 'action_videos' if len(actions[i]) == 11 else 'stage_videos'
             path_clip = os.path.join(self.path_dataset, subfolder, f'{subclipidx}.mp4')
+            path_clip = path_clip.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
             if os.path.isfile(path_clip):
                 video, audio, info = torchvision.io.read_video(path_clip, start_pts=0, end_pts=None, pts_unit='sec')
                 video = video.float()
@@ -614,7 +615,7 @@ class FineGym(data.Dataset):
                 video_padded = torch.nn.functional.pad(video_transformed, pad=padding, mode="constant", value=0)
             else:
                 # print(f'{path_clip} is not a valid file')
-                video_padded = torch.zeros((3, self.seq_len, 80, 80))
+                video_padded = torch.zeros((3, self.seq_len, 128, 128))
             total_clip.append(video_padded)
 
             if subclipidx not in self.subclipidx2label:

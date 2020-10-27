@@ -69,9 +69,12 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
         reward = 1
         # reward value decay by 50% per level going up (or down)
         for i in (reversed if top_down else lambda x: x)(range(labels.size(1))):
-            init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum()) \
-                if separate_levels else (0, sh[args.dataset][0])
-            hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) == labels[:, i]).float().mean() * reward)
+            if separate_levels:
+                init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum())
+                hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) ==
+                                   (labels[:, i] - int(np.array(sh[args.dataset][1][0:i]).sum()))).float().mean() * reward)
+            else:
+                hier_accuracy += ((torch.argmax(pred[:, 0:sh[args.dataset][0]], dim=1) == (labels[:, i])).float().mean() * reward)
             reward = reward / 2
 
     results = accuracy, hier_accuracy, loss.item()

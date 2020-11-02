@@ -670,8 +670,10 @@ class FineGym(data.Dataset):
 
 
 class MovieNet(data.Dataset):
-    def __init__(self, mode='train', transform=None, num_seq=5):
-        self.path_dataset = '/proj/vondrick/datasets/MovieNet'
+    def __init__(self, mode='train', transform=None, num_seq=5, path_dataset=''):
+        if path_dataset == '':
+            path_dataset = '/proj/vondrick/datasets/MovieNet'
+        self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
         self.num_seq = num_seq
@@ -806,7 +808,7 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
     elif args.dataset == 'movienet':
         assert not return_label, 'Not yet implemented (actions not available online)'
         assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
-        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq)
+        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq, path_dataset=path_dataset)
     else:
         raise ValueError('dataset not supported')
 

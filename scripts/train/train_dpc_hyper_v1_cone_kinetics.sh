@@ -25,4 +25,5 @@ main.py \
 --prefix train_dpc_hyper_v1_cone_kinetics \
 --hyp_cone \
 --path_dataset /local/vondrick/ruoshi/k600 \
---margin 2
+--margin 2 \
+--resume logs/log_train_dpc_hyper_v1_cone_kinetics/20201031_202443/model/model_best_epoch1.pth.tar

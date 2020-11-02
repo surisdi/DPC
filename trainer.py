@@ -87,8 +87,8 @@ class Trainer:
                         output_model = self.model(input_seq, labels)
 
                     if self.args.cross_gpu_score:
-                        pred, feature_dist, sizes = output_model
-                        sizes = sizes.float().mean(0).int()
+                        pred, feature_dist, sizes_pred = output_model
+                        sizes_pred = sizes_pred.float().mean(0).int()
 
                         if self.args.parallel == 'ddp':
                             tensors_to_gather = [pred, feature_dist, labels]
@@ -97,9 +97,9 @@ class Trainer:
                             pred, feature_dist, labels = tensors_to_gather
 
                         if self.target is None:
-                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes, labels.shape[0])
+                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
-                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target,
+                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
                                                              self.sizes_mask, labels.shape[0])
                     else:
                         loss, results = output_model

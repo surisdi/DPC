@@ -41,6 +41,7 @@ def get_args():
     parser.add_argument('--linear_input', default='features', type=str, help='Input to the last linear layer',
                         choices=['features_z', 'predictions_c', 'predictions_z_hat'])
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
+    parser.add_argument('--final_2dim', action='store_true', help='Feature space with dimensionality 2')
     # Loss
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
@@ -170,7 +171,7 @@ def main():
         if os.path.isfile(args.pretrain):
             print_r(args, f"=> loading pretrained checkpoint '{args.pretrain}'")
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all')
+            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all', size_diff=args.final_2dim)
             print_r(args, f"=> loaded pretrained checkpoint '{args.pretrain}' (epoch {checkpoint['epoch']})")
         else:
             print_r(args, f"=> no checkpoint found at '{args.pretrain}'", print_no_verbose=True)

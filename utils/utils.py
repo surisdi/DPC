@@ -147,14 +147,26 @@ class AccuracyTable(object):
 
 
 def neq_load_customized(args, model, pretrained_dict,
-                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class']):
-    ''' load pre-trained model in a not-equal way, when new model has been partially modified '''
+                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class'],
+                        size_diff=False):
+    '''
+    load pre-trained model in a not-equal way, when new model has been partially modified
+    size_diff: some parameters may have the same name but different size. Cannot load these, but do not throw error, and
+    load all the rest
+    '''
     model_dict = model.state_dict()
     tmp = {}
     print_r(args, '\n=======Check Weights Loading======')
     print_r(args, ('loading the following parts:', ', '.join(parts)))
     if parts == 'all':
-        tmp = pretrained_dict
+        if size_diff:
+            for k, v in pretrained_dict.items():
+                if model.state_dict()[k].shape == v.shape:
+                    tmp[k] = v
+                else:
+                    print_r(args, f'{k} not loaded')
+        else:
+            tmp = pretrained_dict
     else:
         for part in parts:
             print_r(args, ('loading:', part))
@@ -163,7 +175,8 @@ def neq_load_customized(args, model, pretrained_dict,
             for k, v in pretrained_dict.items():
                 if part in k:
                     if k in model_dict:
-                        tmp[k] = v
+                        if not (size_diff and model.state_dict()[k].shape != v.shape):
+                            tmp[k] = v
                     else:
                         print_r(args, k)
             print_r(args, '---------------------------')

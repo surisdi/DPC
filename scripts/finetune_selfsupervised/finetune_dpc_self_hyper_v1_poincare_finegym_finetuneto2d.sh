@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Here just reusing the fact that we trained an earlyaction one and not start from scratch
-CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
@@ -23,6 +23,9 @@ main.py \
 --fp64_hyper \
 --num_workers 15 \
 --lr 0.0001 \
---prefix finetune_dpc_self_hyper_v1_poincare_finegym_withoutpretrain \
+--prefix finetune_dpc_self_hyper_v1_poincare_finegym_finetuneto2d \
 --cross_gpu_score \
---path_dataset /proj/vondrick/datasets/FineGym
+--pretrain logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_fromearlyaction/20201028_122531/model/model_best_epoch7.pth.tar \
+--final_2dim \
+--path_dataset /proj/vondrick/datasets/FineGym \
+--resume logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_finetuneto2d/20201102_110852/model/epoch4.pth.tar

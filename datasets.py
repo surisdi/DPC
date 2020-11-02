@@ -159,7 +159,8 @@ class Kinetics600_full_3d(data.Dataset):
                  downsample=3,
                  epsilon=5,
                  unit_test=False,
-                 return_label=False):
+                 return_label=False,
+                 vis=False):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
@@ -168,18 +169,19 @@ class Kinetics600_full_3d(data.Dataset):
         self.epsilon = epsilon
         self.unit_test = unit_test
         self.return_label = return_label
+        self.vis = vis
 
         # splits
         if mode == 'train':
-            split = 'process_data/k600/train_split.csv'
+            split = '/proj/vondrick/didac/code/DPC/process_data/data/kinetics600/train_split.csv'
             video_info = pd.read_csv(split, header=None)
         elif (mode == 'val') or (mode == 'test'):
-            split = 'process_data/k600/val_split.csv'
+            split = '/proj/vondrick/didac/code/DPC/process_data/data/kinetics600/train_split.csv'
             video_info = pd.read_csv(split, header=None)
         else:
             raise ValueError('wrong mode')
 
-        path_drop_idx = f'process_data/data/drop_idx_{mode}.pth'
+        path_drop_idx = f'/proj/vondrick/didac/code/DPC/process_data/data/drop_idx_{mode}.pth'
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:
@@ -208,10 +210,15 @@ class Kinetics600_full_3d(data.Dataset):
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
-        vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', '//local/vondrick/ruoshi/k600')
+        vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
         items = self.idx_sampler(vlen, vpath)
-        if items is None: print(vpath)
-
+        while items is None or items[0] is None:
+            index = random.randint(0, len(self.video_info)-1)
+            vpath, vlen = self.video_info.iloc[index]
+            vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+            items = self.idx_sampler(vlen, vpath)
+        
+            
         idx_block, vpath = items
         assert idx_block.shape == (self.num_seq, self.seq_len)
         idx_block = idx_block.reshape(self.num_seq * self.seq_len)
@@ -221,6 +228,9 @@ class Kinetics600_full_3d(data.Dataset):
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
+        if self.vis:
+            input_seq = {'t_seq': t_seq, 'vpath': vpath, 'idx_block': idx_block}
+            return input_seq, 0
         return t_seq, 0  # placeholder, need implement
 
     def __len__(self):
@@ -720,7 +730,7 @@ class MovieNet(data.Dataset):
         return len(self.subclip_seqs)
 
 
-def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, num_workers=0):
+def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, num_workers=0, vis=False):
 
     if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
         raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
@@ -754,7 +764,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                                       seq_len=args.seq_len,
                                       num_seq=args.num_seq,
                                       downsample=5,
-                                      return_label=return_label)
+                                      return_label=return_label,
+                                      vis=vis)
     elif args.dataset == 'ucf101':
         dataset = UCF101_3d(mode=mode,
                             transform=transform,
@@ -802,8 +813,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
     else:  # mode == 'val':
         data_loader = data.DataLoader(dataset,
                                       batch_size=args.batch_size,
-                                      sampler=sampler,
-                                      shuffle=False,
+                                      sampler=None if vis else sampler,
+                                      shuffle=True if vis else False,
                                       num_workers=num_workers,
                                       pin_memory=True,
                                       drop_last=True)

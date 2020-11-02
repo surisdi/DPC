@@ -4,7 +4,7 @@ CUDA_VISIBLE_DEVICES=0,1 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9993 \
+--master_port=9992 \
 --nproc_per_node=2 \
 main.py \
 --network_feature resnet18 \

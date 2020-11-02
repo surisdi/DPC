@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# In this example we implement the eval option 13, from training option 03
-CUDA_VISIBLE_DEVICES=0 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9986 \
---nproc_per_node=1 \
+--master_port=9985 \
+--nproc_per_node=4 \
 main.py \
 --network_feature resnet18 \
 --dataset finegym \
@@ -19,10 +18,10 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-3 \
---prefix test_future_subaction_trainall_finegym_kinetics \
+--prefix future_subaction_linear_finegym_kinetics_fromfinetune_lr3 \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_lr2/20201031_182603/model/model_best_epoch46.pth.tar \
+--pretrain logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_fromearlyaction/20201028_122531/model/model_best_epoch7.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \
@@ -30,8 +29,7 @@ main.py \
 --num_workers 12 \
 --only_train_linear \
 --pred_future \
---test \
 --num_workers 8 \
 --seed 0 \
---path_dataset /proj/vondrick/datasets/FineGym
+--path_dataset /local/vondrick/didacsuris/local_data/FineGym
 

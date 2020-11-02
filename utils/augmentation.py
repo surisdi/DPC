@@ -309,7 +309,6 @@ class RandomGray:
         img = img.unsqueeze(0).expand((3, img.shape[0], img.shape[1], img.shape[2]))
         return img
 
-# TODO
 class ColorJitter(object):
     """Randomly change the brightness, contrast and saturation of an image. --modified from pytorch source code
     Args:

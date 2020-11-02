@@ -23,12 +23,12 @@ class Model(nn.Module):
         self.last_duration = int(math.ceil(args.seq_len / 4))
         self.last_size = int(math.ceil(args.img_dim / 32))
 
-        self.target = self.sizes = None  # Only used if cross_gpu_score is True. Otherwise they are in trainer
+        self.target = self.sizes_mask = None  # Only used if cross_gpu_score is True. Otherwise they are in trainer
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
-        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=False)
+        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=True)
         self.param['num_layers'] = 1  # param for GRU
-        self.param['hidden_size'] = self.param['feature_size'] # param for GRU
+        self.param['hidden_size'] = self.param['feature_size']  # param for GRU
         """
         When using a ConvGRU with a 1x1 convolution, it is equivalent to using a regular GRU by flattening the H and W 
         dimensions and adding those as extra samples in the batch (B' = BxHxW), and then going back to the original 
@@ -187,18 +187,18 @@ class Model(nn.Module):
             if self.args.hyperbolic:
                 pred = self.hyperbolic_linear(pred)
 
-        sizes = self.last_size, self.args.pred_step, size_pred
-        sizes = torch.tensor(sizes).to(pred.device).unsqueeze(0)
+        sizes_pred = self.last_size, self.args.pred_step, size_pred
+        sizes_pred = torch.tensor(sizes_pred).to(pred.device).unsqueeze(0)
 
         if self.args.cross_gpu_score:  # Return all predictions to compute score for all gpus together
-            return pred, feature_dist, sizes
+            return pred, feature_dist, sizes_pred
         else:  # Compute scores individually for the data in this gpu
-            sizes = sizes.float().mean(0).int()
-            score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
+            sizes_pred = sizes_pred.float().mean(0).int()
             if self.target is None:
-                self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
+                self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
-            loss, *results = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes, labels.shape[0])
+            loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
+                                                 self.sizes_mask, labels.shape[0])
             return loss, results
 
     def _initialize_weights(self, module, gain=1.):

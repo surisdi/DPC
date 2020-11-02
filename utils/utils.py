@@ -92,8 +92,8 @@ class AverageMeter(object):
         self.local_history = deque([])
         self.local_avg = 0
         self.history = []
-        self.dict = {} # save all data values here
-        self.save_dict = {} # save mean and std here, for summary table
+        self.dict = {}  # save all data values here
+        self.save_dict = {}  # save mean and std here, for summary table
 
     def update(self, val, n=1, history=0, step=5):
         if type(val) == torch.Tensor:
@@ -148,8 +148,7 @@ class AccuracyTable(object):
 
 def neq_load_customized(args, model, pretrained_dict,
                         parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class']):
-    ''' load pre-trained model in a not-equal way,
-    when new model has been partially modified '''
+    ''' load pre-trained model in a not-equal way, when new model has been partially modified '''
     model_dict = model.state_dict()
     tmp = {}
     print_r(args, '\n=======Check Weights Loading======')
@@ -178,6 +177,10 @@ def neq_load_customized(args, model, pretrained_dict,
     del pretrained_dict
     model_dict.update(tmp)
     del tmp
+    if 'time_index.weight' in model_dict and \
+            'time_index' in [a[0].split('.')[0] for a in list(model.named_parameters())] and \
+            model.time_index.weight.shape[0] < model_dict['time_index.weight'].shape[0]:
+        model_dict['time_index.weight'].data = model_dict['time_index.weight'][:model.time_index.weight.shape[0]].data
     model.load_state_dict(model_dict, strict=False)
     return model
 

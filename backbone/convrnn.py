@@ -76,7 +76,7 @@ class ConvGRU(nn.Module):
             output_inner = []
             for t in range(seq_len):
                 cell_hidden = self.cell_list[idx](current_layer_input[:,t,:], cell_hidden)
-                cell_hidden = self.dropout_layer(cell_hidden) # dropout in each time step
+                cell_hidden = self.dropout_layer(cell_hidden)  # dropout in each time step
                 output_inner.append(cell_hidden)
 
             layer_output = torch.stack(output_inner, dim=1)

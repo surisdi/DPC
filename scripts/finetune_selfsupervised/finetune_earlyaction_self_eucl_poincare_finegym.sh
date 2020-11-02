@@ -12,7 +12,7 @@ main.py \
 --network_feature resnet18 \
 --dataset finegym \
 --seq_len 5 \
---num_seq 8 \
+--num_seq 6 \
 --ds 3 \
 --batch_size 32 \
 --img_dim 128 \

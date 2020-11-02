@@ -44,5 +44,5 @@ def pairwise_distances(x, y=None):
     dist = x_norm + y_norm - 2.0 * torch.mm(x, y_t)
     # Ensure diagonal is zero if x=y
     # if y is None:
-    #     dist = dist - torch.diag(dist.diag)
+    #     dist = dist - torch.diag(dist.diag)8
     return torch.clamp(dist, 1e-7, np.inf)

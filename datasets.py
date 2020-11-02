@@ -15,7 +15,6 @@ from utils import augmentation
 import re
 
 
-# Hardcoded for now. TODO make cleaner
 sizes_hierarchy = {
     'finegym': (307, [288, 15, 4]),
     'hollywood2': (17, [12, 5])
@@ -160,7 +159,8 @@ class Kinetics600_full_3d(data.Dataset):
                  epsilon=5,
                  unit_test=False,
                  return_label=False,
-                 vis=False):
+                 vis=False,
+                 path_dataset=''):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
@@ -170,6 +170,8 @@ class Kinetics600_full_3d(data.Dataset):
         self.unit_test = unit_test
         self.return_label = return_label
         self.vis = vis
+
+        self.path_dataset = path_dataset
 
         # splits
         if mode == 'train':
@@ -210,7 +212,8 @@ class Kinetics600_full_3d(data.Dataset):
 
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
-        vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+        if self.path_dataset != '':
+            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
         items = self.idx_sampler(vlen, vpath)
         while items is None or items[0] is None:
             index = random.randint(0, len(self.video_info)-1)
@@ -541,7 +544,7 @@ class FineGym(data.Dataset):
                 self.parent_classes[idx_class] = (class_number, name_class, grand_class)
                 set_grand_classes.add(grand_class)
                 class_number += 1
-        self.grand_classes = {name: class_number+i for i, name in enumerate(set_grand_classes)}
+        self.grand_classes = {name: class_number+i for i, name in enumerate(sorted(set_grand_classes))}
 
         self.super_classes = {}
         path_categories = 'gym288_categories.txt' if gym288 else 'gym99_categories.txt'
@@ -593,11 +596,15 @@ class FineGym(data.Dataset):
             else:  # mode == 'train':  # take the other 80% of the "train" split
                 labels_train = list(set(range(len(self.clips))) - set(labels_val))
                 self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_train}
+
         self.idx2clipidx = {i: clipidx for i, clipidx in enumerate(self.clips.keys())}
 
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
-        start = random.randint(0, len(segments) - self.num_seq)
+        if self.mode == 'train':
+            start = random.randint(0, len(segments) - self.num_seq)
+        else:
+            start = (len(segments) - self.num_seq) // 2
         actions = list(segments.keys())
         total_clip = []
         labels = []
@@ -605,15 +612,19 @@ class FineGym(data.Dataset):
             subclipidx = clipidx + '_' + actions[i]
             subfolder = 'action_videos' if len(actions[i]) == 11 else 'stage_videos'
             path_clip = os.path.join(self.path_dataset, subfolder, f'{subclipidx}.mp4')
-            path_clip = path_clip.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+            if self.path_dataset != '':
+                path_clip = path_clip.replace('/proj/vondrick/datasets/FineGym', self.path_dataset)
             if os.path.isfile(path_clip):
                 video, audio, info = torchvision.io.read_video(path_clip, start_pts=0, end_pts=None, pts_unit='sec')
                 video = video.float()
                 # Adapt to fps
                 step = int(np.round(info['video_fps'] / self.fps))
                 video_resampled = video[range(0, video.shape[0], step)]
-                # If the video is too long, trim (random position)
-                start_subclip = random.randint(0, np.maximum(0, len(video_resampled) - self.seq_len))
+                # If the video is too long, trim (random position or middle, depending on mode)
+                if self.mode == 'train':
+                    start_subclip = random.randint(0, np.maximum(0, len(video_resampled) - self.seq_len))
+                else:
+                    start_subclip = np.maximum(0, len(video_resampled) - self.seq_len) // 2
                 video_trimmed = video_resampled[start_subclip:start_subclip + self.seq_len]
                 # [C T H W] is the format for the torchvision._transforms_video
                 video_resampled = video_trimmed.permute(3, 0, 1, 2)
@@ -730,30 +741,39 @@ class MovieNet(data.Dataset):
         return len(self.subclip_seqs)
 
 
-def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, num_workers=0, vis=False):
+
+def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False,\
+             num_workers=0, vis=False, path_dataset=''):
 
     if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
         raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
     if return_label and not action_level_gt and args.dataset != 'finegym':
         raise Exception('subaction only subactions available in finegym dataset')
 
-    if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
+    if mode == 'train':
+        if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
+            transform = transforms.Compose([
+                augmentation.RandomHorizontalFlip(consistent=True),
+                augmentation.RandomCrop(size=224, consistent=True),
+                augmentation.Scale(size=(args.img_dim, args.img_dim)),
+                augmentation.RandomGray(consistent=False, p=0.5),
+                augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+                augmentation.ToTensor(),
+                augmentation.Normalize()
+            ])
+        # designed for kinetics400, short size=150, rand crop to 128x128
+        else:
+            transform = transforms.Compose([
+                augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
+                augmentation.RandomHorizontalFlip(consistent=True),
+                augmentation.RandomGray(consistent=False, p=0.5),
+                augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+                augmentation.ToTensor(),
+                augmentation.Normalize()
+            ])
+    else:
         transform = transforms.Compose([
-            augmentation.RandomHorizontalFlip(consistent=True),
-            augmentation.RandomCrop(size=224, consistent=True),
-            augmentation.Scale(size=(args.img_dim, args.img_dim)),
-            augmentation.RandomGray(consistent=False, p=0.5),
-            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
-            augmentation.ToTensor(),
-            augmentation.Normalize()
-        ])
-    # designed for kinetics400, short size=150, rand crop to 128x128
-    else:  # TODO think augmentation for hollywood2 and finegym
-        transform = transforms.Compose([
-            augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
-            augmentation.RandomHorizontalFlip(consistent=True),
-            augmentation.RandomGray(consistent=False, p=0.5),
-            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+            augmentation.CenterCrop(size=args.img_dim, consistent=True),
             augmentation.ToTensor(),
             augmentation.Normalize()
         ])
@@ -765,7 +785,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                                       num_seq=args.num_seq,
                                       downsample=5,
                                       return_label=return_label,
-                                      vis=vis)
+                                      vis=vis,
+                                      path_dataset=path_dataset)
     elif args.dataset == 'ucf101':
         dataset = UCF101_3d(mode=mode,
                             transform=transform,
@@ -792,7 +813,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                           fps=int(25/args.ds),  # approx
                           return_label=return_label,
                           hierarchical_label=hierarchical_label,
-                          action_level_gt=action_level_gt)
+                          action_level_gt=action_level_gt,
+                          path_dataset=path_dataset)
     elif args.dataset == 'movienet':
         assert not return_label, 'Not yet implemented (actions not available online)'
         assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
@@ -800,22 +822,14 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
     else:
         raise ValueError('dataset not supported')
 
-    sampler = data.RandomSampler(dataset)
+    sampler = data.RandomSampler(dataset) if mode == 'train' else data.SequentialSampler(dataset)
 
-    if mode == 'train':
-        data_loader = data.DataLoader(dataset,
-                                      batch_size=args.batch_size,
-                                      sampler=sampler,
-                                      shuffle=False,
-                                      num_workers=num_workers,
-                                      pin_memory=True,
-                                      drop_last=True)
-    else:  # mode == 'val':
-        data_loader = data.DataLoader(dataset,
-                                      batch_size=args.batch_size,
-                                      sampler=None if vis else sampler,
-                                      shuffle=True if vis else False,
-                                      num_workers=num_workers,
-                                      pin_memory=True,
-                                      drop_last=True)
+    data_loader = data.DataLoader(dataset,
+                                  batch_size=args.batch_size,
+                                  sampler=None if vis else sampler,
+                                  shuffle=True if vis else False,  # using shuffle for visualization
+                                  num_workers=num_workers,
+                                  pin_memory=True,
+                                  drop_last=(mode != 'test')  # test always same examples independently of batch size
+                                  )
     return data_loader

@@ -35,6 +35,9 @@ class PairwiseHypConeDist():
         num = xy_prod * (1 + x_square) - x_square * (1 + y_square)
         denom = x_norm * xy_norm * torch.sqrt(1 + x_square * y_square - 2.0 * xy_prod)
         Xi = torch.acos(num / denom)
+
+        if num.max().isnan():
+            print('ey')
         
         # Phi
         Phi = torch.asin(self.K * (1 - x_square) / x_norm)

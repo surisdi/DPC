@@ -27,7 +27,7 @@ class Trainer:
         self.model_path = model_path
         self.scheduler = scheduler
         self.scaler = GradScaler()
-        self.target = self.sizes = None
+        self.target = self.sizes_mask = None
 
     def train(self):
         # --- main loop --- #
@@ -96,13 +96,11 @@ class Trainer:
                                 tensors_to_gather[i] = gather_tensor(v)
                             pred, feature_dist, labels = tensors_to_gather
 
-                        score = losses.compute_scores(self.args, pred, feature_dist, sizes, labels.shape[0])
                         if self.target is None:
-                            self.target, self.sizes = losses.compute_mask(self.args, sizes, labels.shape[0])
+                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes, labels.shape[0])
 
-                        loss, *results = losses.compute_loss(self.args, score, pred, labels, self.target, self.sizes,
-                                                   labels.shape[0])
-                        del score
+                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target,
+                                                             self.sizes_mask, labels.shape[0])
                     else:
                         loss, results = output_model
                     losses.bookkeeping(self.args, avg_meters, results)
@@ -111,7 +109,8 @@ class Trainer:
 
                 if train:
                     # Backward pass
-                    self.scaler.scale(loss.mean()).backward()
+                    scaled_loss = self.scaler.scale(loss.mean())
+                    scaled_loss.backward()
                     self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     self.scaler.step(self.optimizer)
@@ -128,17 +127,19 @@ class Trainer:
                 t.set_postfix(**postfix_kwargs)
 
                 if train and self.args.local_rank <= 0:
+                    acuracy_list_train = {k: v for k, v in postfix_kwargs.items() if 'time' not in k}
                     self.iteration += 1
                     if self.iteration % self.args.print_freq == 0 and self.writers['train'] and not self.args.debug:
                         num_outer_samples = (self.iteration + 1) * self.args.batch_size * \
                                             (1 if 'Parallel' in str(type(self.model)) else self.args.step_n_gpus)
-                        self.writers['train'].add_scalars('train', {**postfix_kwargs}, num_outer_samples)
+                        self.writers['train'].add_scalars('train', {**acuracy_list_train}, num_outer_samples)
 
-            accuracy_list = {k: v.local_avg for k, v in avg_meters.items() if v.count > 0}
+            accuracy_list = {k: v.local_avg if train else v.avg for k, v in avg_meters.items()
+                             if v.count > 0 and 'time' not in k}
 
             if not train and self.args.local_rank <= 0:
                 print(f'[{epoch}/{self.args.epochs}]' +
-                      ''.join([f'{k}: {v.local_avg:.04f}, ' for k, v in avg_meters.items() if v.count > 0]))
+                      ''.join([f'{k}: {v.avg:.04f}, ' for k, v in avg_meters.items() if v.count > 0]))
                 if not self.args.debug:
                     self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
                     self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)

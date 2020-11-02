@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# This is the number 03 in the list
+# Here just reusing the fact that we trained an earlyaction one and not start from scratch
 CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
@@ -23,8 +23,6 @@ main.py \
 --fp64_hyper \
 --num_workers 15 \
 --lr 0.0001 \
---prefix finetune_earlyaction_self_hyper_v1_poincare_finegym \
+--prefix finetune_dpc_self_hyper_v1_poincare_finegym_fromearlyaction \
 --cross_gpu_score \
---early_action \
---early_action_self \
---pretrain logs/log_train_earlyaction_hyper_v1_poincare_kinetics_lr4/20201023_151021/model/model_best_epoch14.pth.tar
+--pretrain logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym/20201025_164701/model/model_best_epoch114.pth.tar \

@@ -9,14 +9,14 @@ from datasets import sizes_hierarchy as sh
 from utils.poincare_distance import poincare_distance
 
 
-def compute_loss(args, score, pred, labels, target, sizes, B):
+def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B):
 
     if args.use_labels:
         results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
-        results, loss = compute_selfsupervised_loss(args, score, target, sizes, B)
+        results, loss = compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B)
 
-    to_return = [loss] + [torch.tensor(r).cuda() for r in results + (B,)]
+    to_return = [loss] + [torch.tensor(r).cuda() for r in results]
     return to_return
 
 
@@ -29,7 +29,15 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
     4. Same as 2 but also with hierarchical information
     5. Predict with sub-action level. Prediction size and label size are the same, and larger than batch size
     6. Predict with sub-action level and also predict parent nodes (args.hierarchical_labels)
+    7. Same as 5 but we only want to predict the last label given the predictions in the prior-to-last subclip
+    8. Similar to 7 but with parent nodes
     """
+    # For points 7 and 8. This is not very efficient because it computes unused predictions, but is just a linear layer
+    if args.pred_future:
+        assert (pred.shape[0] == B * args.num_seq) and (labels.shape[1] == args.num_seq)
+        labels = labels[:, -1]
+        pred = pred.view(B, args.num_seq, -1)[:, -2]
+
     if not args.hierarchical_labels:
         hier_accuracy = -1
         if labels.shape[0] < pred.shape[0]:
@@ -78,90 +86,64 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
                 hier_accuracy += ((torch.argmax(pred[:, 0:sh[args.dataset][0]], dim=1) == (labels[:, i])).float().mean() * reward)
             reward = reward / 2
 
-    results = accuracy, hier_accuracy, loss.item()
+    results = accuracy, hier_accuracy, loss.item(), labels.shape[0]
     return results, loss
 
 
-def compute_selfsupervised_loss(args, score, target, sizes, B):
-    if args.hyp_cone:
-        score[score < 0] = 0
-        pos = score.diag().clone()
-        neg = torch.relu(args.margin - score)
+def compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B):
+    score = compute_scores(args, pred, feature_dist, sizes_pred, B)
+
+    _, B2, NS, NP, SQ = sizes_mask
+    # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
+    # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
+    score_flattened = score.view(B * NP * SQ, B2 * NS * SQ)
+    target_flattened = target.view(B * NP * SQ, B2 * NS * SQ)
+    target_flattened = target_flattened.float().argmax(dim=1)
+
+    loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
+    top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
+
+    results = top1, top3, top5, loss.item(), B
+
+    if args.hyp_cone:  # Add on top of the previous one, instead of replacing it
+        dist_fn = PairwiseHypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
+        score_cone = dist_fn(pred, feature_dist)
+
+        score_cone[score_cone < 0] = 0
+        pos = score_cone.diag().clone()
+        neg = torch.relu(args.margin - score_cone)
         neg.fill_diagonal_(0)
         loss_pos = pos.sum()
-        loss_neg = neg.sum() / score.shape[0]
-        #             print('pos_loss ', loss_pos.item())
-        #             print('neg_loss ', loss_neg.item())
-        loss = loss_pos + loss_neg
+        loss_neg = neg.sum() / score_cone.shape[0]
+        loss_cone = loss_pos + loss_neg
 
-        # TODO check this
-        [A, B] = score.shape
-        score = score[:B, :]
+        _, size_1 = score_cone.shape
+        score = score_cone[:size_1, :]
         pos = score.diagonal(dim1=-2, dim2=-1)
         pos_acc = float((pos == 0).sum().item()) / float(pos.flatten().shape[0])
         k = score.shape[0]
         score.as_strided([k], [k + 1]).copy_(torch.zeros(k))
         neg_acc = float((score == 0).sum().item() - k) / float(k ** 2 - k)
 
-        results = pos_acc, neg_acc, loss.item() / (2 * k ** 2)
+        loss_cone = loss_cone / (2 * k)
 
-    else:
-        _, B2, NS, NP, SQ = sizes
-        # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
-        # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
-        score_flattened = score.view(B * NP * SQ, B2 * NS * SQ)
-        target_flattened = target.view(B * NP * SQ, B2 * NS * SQ)
-        target_flattened = target_flattened.float().argmax(dim=1)
+        loss = loss_cone + loss
+        results = pos_acc, neg_acc, loss_cone.item(), B  # These are the reported values
 
-        loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
-        top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
-
-        results = top1, top3, top5, loss.item()
     return results, loss
 
 
 def compute_scores(args, pred, feature_dist, sizes, B):
-    if args.use_labels:
-        return None  # No need to compute scores
-
     last_size, size_gt, size_pred = sizes.cpu().numpy()
 
     if args.hyperbolic:
-        if args.hyp_cone:
-#             dist_fn = HypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
-#             shape_expand = (pred.shape[0], feature_dist.shape[0], pred.shape[1])
-#             pred_expand = pred.unsqueeze(1).expand(shape_expand)
-#             gt_expand = feature_dist.unsqueeze(0).expand(shape_expand)
-#             reshape_size = (pred.shape[0] * feature_dist.shape[0], pred.shape[1])
-#             pred_expand = pred_expand.reshape(reshape_size)
-#             gt_expand = gt_expand.reshape(reshape_size)
-#             score = dist_fn(pred_expand.float(), gt_expand.float())
-
-#             # loss function (equation 32 of https://arxiv.org/abs/1804.01882)
-#             score = score.reshape(B * size_pred * last_size ** 2, B * size_gt * last_size ** 2)
-            
-            dist_fn = PairwiseHypConeDist(K=0.1, fp64_hyper=args.fp64_hyper)
-            score = dist_fn(pred, feature_dist)
-
-        else:
-            # distance can also be computed with geoopt.manifolds.PoincareBall(c=1) -> .dist
-            # Maybe more accurate (it is more specific for poincare)
-            # But this is much faster... TODO implement batch dist_matrix on geoopt library
-            # score = dist_matrix(pred_hyp, feature_inf_hyp)
-
-            '''
-            replacing geoopt distance
-            '''
-            # manif = geoopt.manifolds.PoincareBall(c=1)
-            # score = manif.dist(pred_expand, gt_expand)
-            # score = manif.dist(pred_expand.float(), gt_expand.float())
-            score = poincare_distance(pred, feature_dist)
-            if args.distance == 'squared':
-                score = score.pow(2)
-            elif args.distance == 'cosh':
-                score = torch.cosh(score).pow(2)
-            score = - score.float()
-            score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
+        score = poincare_distance(pred, feature_dist)
+        if args.distance == 'squared':
+            score = score.pow(2)
+        elif args.distance == 'cosh':
+            score = torch.cosh(score).pow(2)
+        score = - score.float()
+        score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
 
     else:  # euclidean dot product
         ### Get similarity score ###

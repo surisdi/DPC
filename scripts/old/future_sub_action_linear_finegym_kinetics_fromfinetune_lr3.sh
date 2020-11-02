@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # In this example we implement the eval option 13, from training option 03
-CUDA_VISIBLE_DEVICES=0 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9986 \
---nproc_per_node=1 \
+--master_port=9990 \
+--nproc_per_node=2 \
 main.py \
 --network_feature resnet18 \
 --dataset finegym \
@@ -19,19 +19,14 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-3 \
---prefix test_future_subaction_trainall_finegym_kinetics \
+--prefix future_sub_action_linear_finegym_kinetics_lr3_fromfinetune \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_lr2/20201031_182603/model/model_best_epoch46.pth.tar \
+--pretrain logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym/20201025_164701/model/model_best_epoch114.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \
 --use_labels \
 --num_workers 12 \
---only_train_linear \
---pred_future \
---test \
---num_workers 8 \
---seed 0 \
---path_dataset /proj/vondrick/datasets/FineGym
-
+--only_train_linear
+#--cross_gpu_score  Only needed when training with contrastive loss

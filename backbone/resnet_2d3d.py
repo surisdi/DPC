@@ -69,6 +69,7 @@ class BasicBlock3d(nn.Module):
         out = self.relu(out)
 
         out = self.conv2(out)
+        # print(self.bn2.running_var.mean().item(), out.var(dim=0).mean().item(), self.bn2.running_mean.mean().item(), out.mean(dim=0).mean().item(), flush=True)
         out = self.bn2(out)
 
         if self.downsample is not None:

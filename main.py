@@ -49,6 +49,8 @@ def get_args():
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
     parser.add_argument('--pred_step', default=3, type=int, help='How subclips to predict')
+    parser.add_argument('--pred_future', action='store_true',
+                        help='Predict future subaction (instead of predicting every subaction given present and past)')
     parser.add_argument('--cross_gpu_score', action='store_true',
                         help='Compute the score matrix using as negatives samples from different GPUs')
     parser.add_argument('--hierarchical_labels', action='store_true',
@@ -64,6 +66,7 @@ def get_args():
     parser.add_argument('--action_level_gt', action='store_true',
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     parser.add_argument('--img_dim', default=128, type=int)
+    parser.add_argument('--path_dataset', type=str, default='')
     # Training
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
@@ -102,6 +105,21 @@ def get_args():
 
     if args.action_level_gt:
         assert args.linear_input != 'features_z', 'We cannot get a representation for the whole clip with features_z'
+        assert args.use_labels
+
+    if args.pred_future:
+        assert not args.action_level_gt, 'Predicting the future implies predicting subactions'
+        assert args.linear_input != 'features_z', 'We need context from previous frames'
+
+    if args.local_rank == -1:
+        args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        args.n_gpu = args.step_n_gpus = torch.cuda.device_count()
+    else:
+        torch.cuda.set_device(args.local_rank)
+        args.device = torch.device("cuda", args.local_rank)
+        args.n_gpu = 1
+        torch.distributed.init_process_group(backend='nccl', init_method='env://')
+        args.step_n_gpus = torch.distributed.get_world_size()
 
     return args
 
@@ -115,16 +133,6 @@ def main():
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
-    if args.local_rank == -1:
-        args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        args.n_gpu = args.step_n_gpus = torch.cuda.device_count()
-    else:
-        torch.cuda.set_device(args.local_rank)
-        args.device = torch.device("cuda", args.local_rank)
-        args.n_gpu = 1
-        torch.distributed.init_process_group(backend='nccl', init_method='env://')
-        args.step_n_gpus = torch.distributed.get_world_size()
 
     # ---------------------------- Prepare model ----------------------------- #
     if args.local_rank <= 0:
@@ -191,7 +199,7 @@ def main():
     loaders = {split:
                    datasets.get_data(args, split, return_label=args.use_labels,
                                      hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
-                                     num_workers=args.num_workers)
+                                     num_workers=args.num_workers, path_dataset=args.path_dataset)
                for split in splits}
 
     # setup tools
@@ -221,7 +229,7 @@ def set_path(args):
         exp_path = f"logs/log_{args.prefix}/{current_time}"
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
-    if args.local_rank <= 0:
+    if args.local_rank <= 0 and not args.debug:
         if not os.path.exists(img_path):
             os.makedirs(img_path)
         if not os.path.exists(model_path):

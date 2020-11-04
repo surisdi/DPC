@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # In this example we implement the eval option 13, from training option 03
-CUDA_VISIBLE_DEVICES=0 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
@@ -19,10 +19,10 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-3 \
---prefix test_future_subaction_linear_finegym_kinetics \
+--prefix test_future_subaction_linear_finegym_withoutkinetics \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_lr2/20201031_182603/model/model_best_epoch46.pth.tar \
+--pretrain logs/log_future_subaction_linear_finegym_fromonlyfinegym_lr2/20201102_140850/model/model_best_epoch56.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \

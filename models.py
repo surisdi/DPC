@@ -167,6 +167,8 @@ class Model(nn.Module):
                 if self.args.fp64_hyper:
                     input_linear = input_linear.double()
                 input_linear = self.hyperbolic_linear(input_linear)
+                if self.args.final_2dim:
+                    feature_shape = feature_shape[:-1] + (2,)
                 input_linear = input_linear.view(feature_shape)
             pred_classes = self.network_class(input_linear)
             pred = pred_classes

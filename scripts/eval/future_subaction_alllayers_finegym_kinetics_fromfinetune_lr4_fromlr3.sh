@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python main.py \
 --prefix future_subaction_alllayers_finegym_kinetics_fromfinetune_lr4_fromlr3 \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_future_subaction_alllayers_finegym_kinetics_fromfinetune_euclidean_lr3/20201101_121142/model/model_best_epoch41.pth.tar \
+--pretrain logs/log_future_subaction_alllayers_finegym_kinetics_fromfinetune_lr3/20201101_121225/model/epoch46.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \

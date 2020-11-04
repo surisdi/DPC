@@ -25,4 +25,4 @@ main.py \
 --lr 0.001 \
 --prefix train_dpc_hyper_v2_poincare_kinetics \
 --path_dataset /local/vondrick/didacsuris/local_data/kinetics-600/data \
---resume logs/log_train_dpc_hyper_v2_poincare_kinetics/20201101_144309/model/model_best_epoch6.pth.tar
+--resume logs/log_train_dpc_hyper_v2_poincare_kinetics/20201101_144309/model/model_best_epoch15.pth.tar

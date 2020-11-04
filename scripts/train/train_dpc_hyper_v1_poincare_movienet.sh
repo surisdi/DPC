@@ -25,4 +25,4 @@ main.py \
 --lr 0.0001 \
 --prefix train_dpc_hyper_v1_poincare_movienet \
 --path_dataset /local/vondrick/didacsuris/local_data/MovieNet \
---resume logs/log_train_dpc_hyper_v1_poincare_movienet/20201101_130308/model/model_best_epoch14.pth.tar
+--resume logs/log_train_dpc_hyper_v1_poincare_movienet/20201101_130308/model/epoch31.pth.tar

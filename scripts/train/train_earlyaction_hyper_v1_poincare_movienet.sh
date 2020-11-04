@@ -26,5 +26,5 @@ main.py \
 --cross_gpu_score \
 --early_action \
 --early_action_self \
---resume logs/log_train_earlyaction_hyper_v1_poincare_movienet/20201031_183159/model/epoch4.pth.tar \
+--resume logs/log_train_earlyaction_hyper_v1_poincare_movienet/20201031_183159/model/epoch24.pth.tar \
 --path_dataset /local/vondrick/didacsuris/local_data/MovieNet

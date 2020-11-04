@@ -57,6 +57,8 @@ def get_args():
     parser.add_argument('--hierarchical_labels', action='store_true',
                         help='Works both for training with labels and for testing the accuracy')
     parser.add_argument('--test', action='store_true', help='Test system')
+    parser.add_argument('--test_info', default='compute_accuracy', type=str, help='Test to perform')
+    parser.add_argument('--no_spatial', action='store_true', help='Mean pool spatial dimensions')
     # Data
     parser.add_argument('--dataset', default='ucf101', type=str)
     parser.add_argument('--seq_len', default=5, type=int, help='Number of frames in each video block')
@@ -68,6 +70,8 @@ def get_args():
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--path_dataset', type=str, default='')
+    parser.add_argument('--viz', action='store_true',
+                        help='Visualization mode. Return more data from the dataset, shuffle it, etc.')
     # Training
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
@@ -122,6 +126,9 @@ def get_args():
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
         args.step_n_gpus = torch.distributed.get_world_size()
 
+    if args.test:
+        torch.backends.cudnn.deterministic = True
+
     return args
 
 
@@ -165,7 +172,7 @@ def main():
                 print_r(args, f'==== Restart optimizer with a learning rate {args.lr} ====')
             print_r(args, f"=> loaded resumed checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
         else:
-            print_r(args, f"[Warning] no checkpoint found at '{args.resume}'")
+            print_r(args, f"[Warning] no checkpoint found at '{args.resume}'", print_no_verbose=True)
 
     elif args.pretrain:  # resume overwrites this
         if os.path.isfile(args.pretrain):

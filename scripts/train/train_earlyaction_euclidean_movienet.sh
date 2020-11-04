@@ -22,4 +22,6 @@ main.py \
 --cross_gpu_score \
 --early_action \
 --early_action_self \
---path_dataset /local/vondrick/didacsuris/local_data/MovieNet
+--path_dataset /local/vondrick/didacsuris/local_data/MovieNet \
+--resume logs/log_train_earlyaction_euclidean_movienet/20201102_141930/model/epoch26.pth.tar
+

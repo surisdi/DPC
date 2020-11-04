@@ -20,10 +20,10 @@ main.py \
 --epochs 200 \
 --fp16 \
 --fp64_hyper \
---num_workers 15 \
+--num_workers 7 \
 --lr 0.001 \
 --prefix train_dpc_hyper_v1_cone_kinetics \
 --hyp_cone \
 --path_dataset /local/vondrick/ruoshi/k600 \
 --margin 2 \
---resume logs/log_train_dpc_hyper_v1_cone_kinetics/20201031_202443/model/model_best_epoch1.pth.tar
+--resume logs/log_train_dpc_hyper_v1_cone_kinetics/20201031_202443/model/model_best_epoch10.pth.tar

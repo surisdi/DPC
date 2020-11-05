@@ -26,7 +26,7 @@ class Model(nn.Module):
         self.target = self.sizes_mask = None  # Only used if cross_gpu_score is True. Otherwise they are in trainer
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
-        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=True)
+        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=False)
         self.param['num_layers'] = 1  # param for GRU
         self.param['hidden_size'] = self.param['feature_size']  # param for GRU
         """

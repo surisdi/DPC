@@ -10,6 +10,7 @@ import dash_html_components as html
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
 import json
+import sys
 
 from dash_util import create_gif_card
 
@@ -88,4 +89,4 @@ def number_render(example_ind, num_NN, model_path):
 
 # ------------------------------------------------------------------------------
 if __name__ == '__main__':
-    app.run_server(debug=True, port=10086)
+    app.run_server(debug=True, port=sys.argv[0], host='0.0.0.0')

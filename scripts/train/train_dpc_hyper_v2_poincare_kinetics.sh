@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # This is the number 03 in the list
-CUDA_VISIBLE_DEVICES=4 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
 --master_port=9999 \
---nproc_per_node=1 \
+--nproc_per_node=4 \
 main.py \
 --pred_step 3 \
 --hyperbolic \
@@ -24,4 +24,5 @@ main.py \
 --num_workers 15 \
 --lr 0.001 \
 --prefix train_dpc_hyper_v2_poincare_kinetics \
---path_dataset /local/vondrick/didacsuris/local_data/kinetics-600/data
+--path_dataset /local/vondrick/didacsuris/local_data/kinetics-600/data \
+--resume logs/log_train_dpc_hyper_v2_poincare_kinetics/20201101_144309/model/model_best_epoch15.pth.tar

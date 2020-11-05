@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # This is the number 03 in the list
-# Changed from lr3 to lr4 in epoch 13 (also started epoch 1 with only 1 gpu)
 CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
@@ -8,10 +7,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 --master_port=9998 \
 --nproc_per_node=4 \
 main.py \
---pred_step 3 \
---hyperbolic \
---hyperbolic_version 1 \
---distance squared \
+--pred_step 1 \
 --network_feature resnet18 \
 --dataset movienet \
 --seq_len 3 \
@@ -20,9 +16,12 @@ main.py \
 --img_dim 128 \
 --epochs 200 \
 --fp16 \
---fp64_hyper \
---num_workers 10 \
---lr 0.0001 \
---prefix train_dpc_hyper_v1_poincare_movienet \
+--num_workers 15 \
+--lr 0.001 \
+--prefix train_earlyaction_euclidean_movienet \
+--cross_gpu_score \
+--early_action \
+--early_action_self \
 --path_dataset /local/vondrick/didacsuris/local_data/MovieNet \
---resume logs/log_train_dpc_hyper_v1_poincare_movienet/20201101_130308/model/epoch31.pth.tar
+--resume logs/log_train_earlyaction_euclidean_movienet/20201102_141930/model/epoch26.pth.tar
+

@@ -159,7 +159,7 @@ class Kinetics600_full_3d(data.Dataset):
                  epsilon=5,
                  unit_test=False,
                  return_label=False,
-                 vis=False,
+                 return_idx=False,
                  path_dataset=''):
         self.mode = mode
         self.transform = transform
@@ -169,7 +169,7 @@ class Kinetics600_full_3d(data.Dataset):
         self.epsilon = epsilon
         self.unit_test = unit_test
         self.return_label = return_label
-        self.vis = vis
+        self.return_idx = return_idx
 
         self.path_dataset = path_dataset
 
@@ -210,6 +210,21 @@ class Kinetics600_full_3d(data.Dataset):
         seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
 
+    def get_info(self, index):
+        vpath, vlen = self.video_info.iloc[index]
+        if self.path_dataset != '':
+            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
+        items = self.idx_sampler(vlen, vpath)
+        while items is None or items[0] is None:
+            index = random.randint(0, len(self.video_info) - 1)
+            vpath, vlen = self.video_info.iloc[index]
+            vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+            items = self.idx_sampler(vlen, vpath)
+
+        idx_block, vpath = items
+
+        return idx_block, vpath
+
     def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
         if self.path_dataset != '':
@@ -220,8 +235,7 @@ class Kinetics600_full_3d(data.Dataset):
             vpath, vlen = self.video_info.iloc[index]
             vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
             items = self.idx_sampler(vlen, vpath)
-        
-            
+
         idx_block, vpath = items
         assert idx_block.shape == (self.num_seq, self.seq_len)
         idx_block = idx_block.reshape(self.num_seq * self.seq_len)
@@ -231,10 +245,9 @@ class Kinetics600_full_3d(data.Dataset):
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-        if self.vis:
-            input_seq = {'t_seq': t_seq, 'vpath': vpath, 'idx_block': idx_block}
-            return input_seq, 0
-        return t_seq, 0  # placeholder, need implement
+        if self.return_idx:
+            return t_seq, 0, index
+        return t_seq, 0  # placeholder for labels, need implement
 
     def __len__(self):
         return len(self.video_info)
@@ -507,7 +520,8 @@ class FineGym(data.Dataset):
                  gym288=True,
                  fps=5,
                  hierarchical_label=False,
-                 action_level_gt=False):
+                 action_level_gt=False,
+                 return_idx=False):
         self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
@@ -519,6 +533,7 @@ class FineGym(data.Dataset):
         self.fps = fps
         self.hierarchical_label = hierarchical_label,
         self.action_level_gt = action_level_gt
+        self.return_idx = return_idx
 
         if mode in ['train', 'val']:
             path_labels = 'gym288_train_element_v1.1.txt' if gym288 else 'gym99_train_element_v1.1.txt'
@@ -599,6 +614,12 @@ class FineGym(data.Dataset):
 
         self.idx2clipidx = {i: clipidx for i, clipidx in enumerate(self.clips.keys())}
 
+    def get_info(self, index):
+        clipidx = self.idx2clipidx[index]
+        segments = self.clips[clipidx]
+
+        return clipidx, segments
+
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
         if self.mode == 'train':
@@ -661,7 +682,7 @@ class FineGym(data.Dataset):
             labels_to_consider = labels[:, -1][labels[:, -1] != -1]
             if len(labels_to_consider) > 0:
                 assert torch.all(labels_to_consider == labels_to_consider[0]), 'What is going on?'
-                labels = labels_to_consider[0]
+                labels = labels_to_consider[0]  # TODO add this when training new models - 288 - 15
             else:
                 labels = torch.tensor(-1)
 
@@ -673,6 +694,8 @@ class FineGym(data.Dataset):
         video, labels = self.read_video(clipidx, segments)
         if not self.return_label:
             labels = torch.tensor(-1)
+        if self.return_idx:
+            return video, labels, index
         return video, labels
 
     def __len__(self):
@@ -680,8 +703,10 @@ class FineGym(data.Dataset):
 
 
 class MovieNet(data.Dataset):
-    def __init__(self, mode='train', transform=None, num_seq=5):
-        self.path_dataset = '/proj/vondrick/datasets/MovieNet'
+    def __init__(self, mode='train', transform=None, num_seq=5, path_dataset=''):
+        if path_dataset == '':
+            path_dataset = '/proj/vondrick/datasets/MovieNet'
+        self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
         self.num_seq = num_seq
@@ -741,9 +766,8 @@ class MovieNet(data.Dataset):
         return len(self.subclip_seqs)
 
 
-
 def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False,\
-             num_workers=0, vis=False, path_dataset=''):
+             num_workers=0, path_dataset=''):
 
     if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
         raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
@@ -785,7 +809,7 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                                       num_seq=args.num_seq,
                                       downsample=5,
                                       return_label=return_label,
-                                      vis=vis,
+                                      return_idx=args.viz,
                                       path_dataset=path_dataset)
     elif args.dataset == 'ucf101':
         dataset = UCF101_3d(mode=mode,
@@ -814,20 +838,21 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                           return_label=return_label,
                           hierarchical_label=hierarchical_label,
                           action_level_gt=action_level_gt,
-                          path_dataset=path_dataset)
+                          path_dataset=path_dataset,
+                          return_idx=args.viz)
     elif args.dataset == 'movienet':
         assert not return_label, 'Not yet implemented (actions not available online)'
         assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
-        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq)
+        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq, path_dataset=path_dataset)
     else:
         raise ValueError('dataset not supported')
 
-    sampler = data.RandomSampler(dataset) if mode == 'train' else data.SequentialSampler(dataset)
+    sampler = data.RandomSampler(dataset) if mode == 'train' or args.viz else data.SequentialSampler(dataset)
 
     data_loader = data.DataLoader(dataset,
                                   batch_size=args.batch_size,
-                                  sampler=None if vis else sampler,
-                                  shuffle=True if vis else False,  # using shuffle for visualization
+                                  sampler=sampler,
+                                  shuffle=False,
                                   num_workers=num_workers,
                                   pin_memory=True,
                                   drop_last=(mode != 'test')  # test always same examples independently of batch size

@@ -41,6 +41,7 @@ def get_args():
     parser.add_argument('--linear_input', default='features', type=str, help='Input to the last linear layer',
                         choices=['features_z', 'predictions_c', 'predictions_z_hat'])
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
+    parser.add_argument('--final_2dim', action='store_true', help='Feature space with dimensionality 2')
     # Loss
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
@@ -56,6 +57,8 @@ def get_args():
     parser.add_argument('--hierarchical_labels', action='store_true',
                         help='Works both for training with labels and for testing the accuracy')
     parser.add_argument('--test', action='store_true', help='Test system')
+    parser.add_argument('--test_info', default='compute_accuracy', type=str, help='Test to perform')
+    parser.add_argument('--no_spatial', action='store_true', help='Mean pool spatial dimensions')
     # Data
     parser.add_argument('--dataset', default='ucf101', type=str)
     parser.add_argument('--seq_len', default=5, type=int, help='Number of frames in each video block')
@@ -67,6 +70,8 @@ def get_args():
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--path_dataset', type=str, default='')
+    parser.add_argument('--viz', action='store_true',
+                        help='Visualization mode. Return more data from the dataset, shuffle it, etc.')
     # Training
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
@@ -121,6 +126,9 @@ def get_args():
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
         args.step_n_gpus = torch.distributed.get_world_size()
 
+    if args.test:
+        torch.backends.cudnn.deterministic = True
+
     return args
 
 
@@ -164,13 +172,13 @@ def main():
                 print_r(args, f'==== Restart optimizer with a learning rate {args.lr} ====')
             print_r(args, f"=> loaded resumed checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
         else:
-            print_r(args, f"[Warning] no checkpoint found at '{args.resume}'")
+            print_r(args, f"[Warning] no checkpoint found at '{args.resume}'", print_no_verbose=True)
 
     elif args.pretrain:  # resume overwrites this
         if os.path.isfile(args.pretrain):
             print_r(args, f"=> loading pretrained checkpoint '{args.pretrain}'")
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all')
+            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all', size_diff=args.final_2dim)
             print_r(args, f"=> loaded pretrained checkpoint '{args.pretrain}' (epoch {checkpoint['epoch']})")
         else:
             print_r(args, f"=> no checkpoint found at '{args.pretrain}'", print_no_verbose=True)

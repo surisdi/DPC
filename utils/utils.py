@@ -94,18 +94,37 @@ class AverageMeter(object):
         self.history = []
         self.dict = {}  # save all data values here
         self.save_dict = {}  # save mean and std here, for summary table
+        self.avg_expanded = np.array([0])
 
     def update(self, val, n=1, history=0, step=5):
+        is_array = False
         if type(val) == torch.Tensor:
-            val = val.mean().item()
+            if len(val.shape) > 0 and val.shape[0] > 1:
+                is_array = True
+                val = val.view(-1).cpu().data.detach().numpy()
+            else:
+                val = val.mean().item()
+        elif type(val) == np.ndarray:
+            if len(val.shape) > 0 and val.shape[0] > 1:
+                is_array = True
+                val = val.reshape(-1)
+        elif type(val) == float:
+            pass
+        else:
+            raise TypeError(f'{type(val)} type not supported in AverageMeter')
         if type(n) == torch.Tensor:
             n = n.float().mean().item()
-        self.val = val
+        self.val = np.mean(val)
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        if is_array:
+            self.avg_expanded = self.sum / self.count
+            self.avg = self.avg_expanded.mean()
+        else:
+            self.avg = self.sum / self.count
+            self.avg_expanded = np.array([self.avg])
         if history:
-            self.history.append(val)
+            self.history.append(val.mean())
         if step > 0:
             self.local_history.append(val)
             if len(self.local_history) > step:
@@ -147,14 +166,26 @@ class AccuracyTable(object):
 
 
 def neq_load_customized(args, model, pretrained_dict,
-                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class']):
-    ''' load pre-trained model in a not-equal way, when new model has been partially modified '''
+                        parts=['backbone', 'agg', 'network_pred', 'hyperbolic_linear', 'network-class'],
+                        size_diff=False):
+    '''
+    load pre-trained model in a not-equal way, when new model has been partially modified
+    size_diff: some parameters may have the same name but different size. Cannot load these, but do not throw error, and
+    load all the rest
+    '''
     model_dict = model.state_dict()
     tmp = {}
     print_r(args, '\n=======Check Weights Loading======')
     print_r(args, ('loading the following parts:', ', '.join(parts)))
     if parts == 'all':
-        tmp = pretrained_dict
+        if size_diff:
+            for k, v in pretrained_dict.items():
+                if k in model.state_dict() and model.state_dict()[k].shape == v.shape:
+                    tmp[k] = v
+                else:
+                    print_r(args, f'{k} not loaded')
+        else:
+            tmp = pretrained_dict
     else:
         for part in parts:
             print_r(args, ('loading:', part))
@@ -163,7 +194,8 @@ def neq_load_customized(args, model, pretrained_dict,
             for k, v in pretrained_dict.items():
                 if part in k:
                     if k in model_dict:
-                        tmp[k] = v
+                        if not (size_diff and model.state_dict()[k].shape != v.shape):
+                            tmp[k] = v
                     else:
                         print_r(args, k)
             print_r(args, '---------------------------')

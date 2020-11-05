@@ -20,7 +20,7 @@ def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mas
     return to_return
 
 
-def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_levels=True):
+def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate_levels=True):
     """
     Six options to predict:
     1. Predict a single label for each sample (clip). Both num of labels and prediction size are equal to batch size
@@ -39,7 +39,7 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
         pred = pred.view(B, args.num_seq, -1)[:, -2]
 
     if not args.hierarchical_labels:
-        hier_accuracy = -1
+        hier_accuracies = -1
         if labels.shape[0] < pred.shape[0]:
             if len(labels.shape) == 1:  # Option 2
                 assert pred.shape[0] % labels.shape[0] == 0, \
@@ -52,7 +52,12 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
         else:  # Option 1
             gt = labels.to(args.device)
         loss = torch.nn.functional.cross_entropy(pred, gt, ignore_index=-1)
-        accuracy = (torch.argmax(pred, dim=1) == gt).float().mean()
+
+        accuracies = (torch.argmax(pred, dim=1) == gt).float()
+        if args.early_action:
+            accuracy = accuracies.view(B, -1).mean(0)
+        else:
+            accuracy = accuracies.mean()
 
     else:
         # train with multiple positive labels
@@ -74,19 +79,25 @@ def compute_supervised_loss(args, pred, labels, B, top_down=False, separate_leve
 
         loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
         accuracy = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float().mean()
-        hier_accuracy = 0
-        reward = 1
-        # reward value decay by 50% per level going up (or down)
-        for i in (reversed if top_down else lambda x: x)(range(labels.size(1))):
-            if separate_levels:
-                init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum())
-                hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) ==
-                                   (labels[:, i] - int(np.array(sh[args.dataset][1][0:i]).sum()))).float().mean() * reward)
-            else:
-                hier_accuracy += ((torch.argmax(pred[:, 0:sh[args.dataset][0]], dim=1) == (labels[:, i])).float().mean() * reward)
-            reward = reward / 2
 
-    results = accuracy, hier_accuracy, loss.item(), labels.shape[0]
+        hier_accuracies = []
+        for top_down in [True, False]:
+            for separate_levels in [True, False]:
+                hier_accuracy = 0
+                reward = 1
+                # reward value decay by 50% per level going up (or down)
+                for i in (reversed if top_down else lambda x: x)(range(labels.size(1))):
+                    if separate_levels:
+                        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i+1]).sum())
+                        hier_accuracy += ((torch.argmax(pred[:, init:end], dim=1) ==
+                                           (labels[:, i] - int(np.array(sh[args.dataset][1][0:i]).sum()))).float().mean() * reward)
+                    else:
+                        hier_accuracy += ((torch.argmax(pred[:, 0:sh[args.dataset][0]], dim=1) == (labels[:, i])).float().mean() * reward)
+                    reward = reward / 2
+                hier_accuracies.append(hier_accuracy)
+        hier_accuracies = torch.tensor(hier_accuracies)
+
+    results = accuracy, hier_accuracies, loss.item(), labels.shape[0]
     return results, loss
 
 
@@ -152,6 +163,9 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         score = torch.matmul(pred, feature_dist.transpose(0, 1))
         score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
 
+    if args.no_spatial:
+        score = score.mean(dim=[2, 5])
+
     return score
 
 
@@ -191,6 +205,11 @@ def compute_mask(args, sizes, B):
     (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]
     target = mask == 1
     target.requires_grad = False
+
+    if args.no_spatial:
+        target = target[:, :, 0, :, :, 0]
+        SQ = 1
+
     return target, (B, B2, NS, NP, SQ)
 
 

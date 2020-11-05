@@ -44,7 +44,8 @@ class Model(nn.Module):
             # self.adapt_layer = nn.Linear(self.param['feature_size'], self.param['feature_size'])
             # self._initialize_weights(self.adapt_layer, gain=0.01)
 
-            self.hyperbolic_linear = MobiusLinear(self.param['feature_size'], self.param['feature_size'],
+            self.hyperbolic_linear = MobiusLinear(self.param['feature_size'],
+                                                  self.param['feature_size'] if not args.final_2dim else 2,
                                                   # This computes an exmap0 after the operation, where the linear
                                                   # operation operates in the Euclidean space.
                                                   hyperbolic_input=False,
@@ -63,19 +64,23 @@ class Model(nn.Module):
 
         if args.use_labels:
             if args.hyperbolic:
-                self.network_class = MobiusDist2Hyperplane(self.param['feature_size'], args.n_classes)
+                self.network_class = MobiusDist2Hyperplane(
+                    self.param['feature_size'] if not args.final_2dim else 2,
+                    args.n_classes
+                )
             else:
                 self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
         if not args.use_labels or self.args.linear_input == 'predictions_z_hat':
             self.network_pred = nn.Sequential(
                                     nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0),
                                     nn.ReLU(inplace=True),
-                                    nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0)
+                                    nn.Conv2d(self.param['feature_size'], self.param['feature_size'],
+                                              kernel_size=1, padding=0)
                                     )
             self._initialize_weights(self.network_pred)
 
         # If the task is predicting the last subaction, we need some indexing of how far it is
-        if self.args.early_action_self or (self.args.early_action and not self.args.action_level_gt):
+        if self.args.early_action_self:
             self.time_index = nn.Embedding(self.args.num_seq, self.param['feature_size'])
 
         self.mask = None
@@ -99,6 +104,8 @@ class Model(nn.Module):
         if self.args.hyperbolic:
             feature_reshape = feature.permute(0, 2, 3, 4, 1)
             mid_feature_shape = feature_reshape.shape
+            if self.args.final_2dim:
+                mid_feature_shape = mid_feature_shape[:-1] + (2, )
             feature_reshape = feature_reshape.reshape(-1, feature.shape[1])
             # feature_adapt = self.adapt_layer(feature_reshape)
             feature_dist = self.hyperbolic_linear(feature_reshape)  # performs exmap0
@@ -117,11 +124,13 @@ class Model(nn.Module):
             feature_dist = feature_g = feature
 
         # before ReLU, (-inf, +inf)
-        feature_dist = feature_dist.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
+        feature_dist = feature_dist.view(B, N, 2 if self.args.final_2dim else self.param['feature_size'],
+                                         self.last_size, self.last_size)
         feature_predict_from = feature_dist  # To train linear layer on top of
         # And these are the features we have to "predict to" (in the self-supervised setting)
         feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
-        feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2, self.param['feature_size'])  # .transpose(0,1)
+        feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2,
+                                                               2 if self.args.final_2dim else self.param['feature_size'])  # .transpose(0,1)
 
         # ----------- STEP 2: compute predictions ------- #
 
@@ -158,6 +167,8 @@ class Model(nn.Module):
                 if self.args.fp64_hyper:
                     input_linear = input_linear.double()
                 input_linear = self.hyperbolic_linear(input_linear)
+                if self.args.final_2dim:
+                    feature_shape = feature_shape[:-1] + (2,)
                 input_linear = input_linear.view(feature_shape)
             pred_classes = self.network_class(input_linear)
             pred = pred_classes

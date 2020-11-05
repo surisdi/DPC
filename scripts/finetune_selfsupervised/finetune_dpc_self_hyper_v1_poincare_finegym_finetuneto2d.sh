@@ -23,6 +23,9 @@ main.py \
 --fp64_hyper \
 --num_workers 15 \
 --lr 0.0001 \
---prefix finetune_dpc_self_hyper_v1_poincare_finegym_withoutpretrain \
+--prefix finetune_dpc_self_hyper_v1_poincare_finegym_finetuneto2d \
 --cross_gpu_score \
---path_dataset /proj/vondrick/datasets/FineGym
+--pretrain logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_fromearlyaction/20201028_122531/model/model_best_epoch7.pth.tar \
+--final_2dim \
+--path_dataset /proj/vondrick/datasets/FineGym \
+--resume logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_finetuneto2d/20201102_110852/model/epoch191.pth.tar

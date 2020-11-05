@@ -9,8 +9,9 @@ from tqdm import tqdm
 import losses
 import random
 from utils.utils import save_checkpoint, AverageMeter
+from visualization import generate_embeddings
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 
 class Trainer:
@@ -51,10 +52,13 @@ class Trainer:
                                 keep_all=False)
 
     def test(self):
-        accuracies_test = self.run_epoch(epoch=None, train=False)
-        if self.args.local_rank <= 0:
-            print('Accuracies test:')
-            print(accuracies_test)
+        if self.args.test_info == 'compute_accuracy':
+            accuracies_test = self.run_epoch(epoch=None, train=False)
+            if self.args.local_rank <= 0:
+                print('Accuracies test:')
+                print(accuracies_test)
+        elif self.args.test_info == 'generate_embeddings':
+            generate_embeddings.main(self)
 
     def run_epoch(self, epoch, train=True, return_all_acc=False):
         if self.args.device == "cuda":
@@ -87,8 +91,8 @@ class Trainer:
                         output_model = self.model(input_seq, labels)
 
                     if self.args.cross_gpu_score:
-                        pred, feature_dist, sizes = output_model
-                        sizes = sizes.float().mean(0).int()
+                        pred, feature_dist, sizes_pred = output_model
+                        sizes_pred = sizes_pred.float().mean(0).int()
 
                         if self.args.parallel == 'ddp':
                             tensors_to_gather = [pred, feature_dist, labels]
@@ -97,9 +101,9 @@ class Trainer:
                             pred, feature_dist, labels = tensors_to_gather
 
                         if self.target is None:
-                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes, labels.shape[0])
+                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
-                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target,
+                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
                                                              self.sizes_mask, labels.shape[0])
                     else:
                         loss, results = output_model
@@ -139,7 +143,8 @@ class Trainer:
 
             if not train and self.args.local_rank <= 0:
                 print(f'[{epoch}/{self.args.epochs}]' +
-                      ''.join([f'{k}: {v.avg:.04f}, ' for k, v in avg_meters.items() if v.count > 0]))
+                      ''.join([f'{k}: {", ".join([f"{v_:.04f}" for v_ in v.avg_expanded])}, '
+                               for k, v in avg_meters.items() if v.count > 0]))
                 if not self.args.debug:
                     self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
                     self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)

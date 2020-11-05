@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# In this example we implement the eval option 13, from training option 01
-CUDA_VISIBLE_DEVICES=0 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+# In this example we implement the eval option 13, from training option 03
+CUDA_VISIBLE_DEVICES=4 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9987 \
+--master_port=9986 \
 --nproc_per_node=1 \
 main.py \
 --network_feature resnet18 \
 --dataset finegym \
 --batch_size 32 \
 --img_dim 128 \
+--epochs 100 \
+--hyperbolic \
+--hyperbolic_version 1 \
 --pred_step 0 \
 --seq_len 5 \
 --num_seq 6 \
+--distance 'squared' \
 --lr 1e-3 \
---prefix test_future_subaction_trainall_finegym_kinetics_euclidean \
+--prefix test_future_subaction_linear_finegym_withoutkinetics \
 --fp16 \
---pretrain logs/log_future_subaction_alllayers_finegym_kinetics_fromfinetune_euclidean_lr3/20201101_121142/model/model_best_epoch41.pth.tar  \
+--fp64_hyper \
+--pretrain logs/log_future_subaction_linear_finegym_fromonlyfinegym_lr2/20201102_140850/model/model_best_epoch56.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \
@@ -27,5 +32,6 @@ main.py \
 --pred_future \
 --test \
 --num_workers 8 \
---seed 1 \
+--seed 0 \
 --path_dataset /proj/vondrick/datasets/FineGym
+

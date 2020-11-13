@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-CUDA_VISIBLE_DEVICES=2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9996 \
---nproc_per_node=2 \
+--master_port=9985 \
+--nproc_per_node=4 \
 main.py \
 --network_feature resnet18 \
 --dataset finegym \
---batch_size 128 \
+--batch_size 32 \
 --img_dim 128 \
 --epochs 100 \
 --hyperbolic \
@@ -18,10 +18,10 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-2 \
---prefix earlyaction_linear_finegym_kinetics_fromfinetune_lr2 \
+--prefix earlyaction_linear_finegym_64d \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_earlyaction_linear_finegym_kinetics_fromfinetune_lr2/20201101_192504/model/model_best_epoch91.pth.tar \
+--pretrain logs/log_earlyaction_linear_finegym_64d/20201110_172537/model/model_best_epoch79.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --use_labels \
@@ -31,5 +31,7 @@ main.py \
 --num_workers 8 \
 --seed 0 \
 --action_level_gt \
---test \
---path_dataset /proj/vondrick/datasets/FineGym
+--feature_dim 64 \
+--path_dataset /proj/vondrick/datasets/FineGym \
+--test
+

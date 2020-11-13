@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=0,1 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 main.py \
 --network_feature resnet18 \
 --dataset finegym \
---batch_size 32 \
+--batch_size 128 \
 --img_dim 128 \
 --epochs 100 \
 --pred_step 0 \
@@ -29,4 +29,3 @@ main.py \
 --action_level_gt \
 --test \
 --path_dataset /proj/vondrick/datasets/FineGym
-

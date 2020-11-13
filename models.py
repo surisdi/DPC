@@ -26,9 +26,15 @@ class Model(nn.Module):
         self.target = self.sizes_mask = None  # Only used if cross_gpu_score is True. Otherwise they are in trainer
         # print('final feature map has size %dx%d' % (self.last_size, self.last_size))
 
-        self.backbone, self.param = select_resnet(args.network_feature, track_running_stats=True)
-        self.param['num_layers'] = 1  # param for GRU
-        self.param['hidden_size'] = self.param['feature_size']  # param for GRU
+        self.backbone, self.param = select_resnet(args.network_feature,
+                                                  track_running_stats=not args.not_track_running_stats)
+
+        self.feature_dim = self.param['feature_size'] if args.feature_dim == -1 else args.feature_dim
+        self.adapt_dim = \
+            nn.Linear(self.param['feature_size'], args.feature_dim) if args.feature_dim != -1 else nn.Identity()
+
+        self.num_layers = 1  # param for GRU
+
         """
         When using a ConvGRU with a 1x1 convolution, it is equivalent to using a regular GRU by flattening the H and W 
         dimensions and adding those as extra samples in the batch (B' = BxHxW), and then going back to the original 
@@ -41,11 +47,11 @@ class Model(nn.Module):
             # least after initialization). Modifying the initializaton of the ResNet is hard because of the batchnorms
             # and the residual connections. And making the output after the network always small (by dividing by a fix
             # number is not ideal because the network cannot learn to calibrate).
-            # self.adapt_layer = nn.Linear(self.param['feature_size'], self.param['feature_size'])
+            # self.adapt_layer = nn.Linear(self.feature_dim, self.feature_dim)
             # self._initialize_weights(self.adapt_layer, gain=0.01)
 
-            self.hyperbolic_linear = MobiusLinear(self.param['feature_size'],
-                                                  self.param['feature_size'] if not args.final_2dim else 2,
+            self.hyperbolic_linear = MobiusLinear(self.feature_dim,
+                                                  self.feature_dim if not args.final_2dim else 2,
                                                   # This computes an exmap0 after the operation, where the linear
                                                   # operation operates in the Euclidean space.
                                                   hyperbolic_input=False,
@@ -57,31 +63,28 @@ class Model(nn.Module):
                 self.hyperbolic_linear = self.hyperbolic_linear.double()
         self.fp64_hyper = args.fp64_hyper
 
-        self.agg = ConvGRU(input_size=self.param['feature_size'],
-                           hidden_size=self.param['hidden_size'],
+        self.agg = ConvGRU(input_size=self.feature_dim,
+                           hidden_size=self.feature_dim,
                            kernel_size=1,
-                           num_layers=self.param['num_layers'])
+                           num_layers=self.num_layers)
 
         if args.use_labels:
             if args.hyperbolic:
-                self.network_class = MobiusDist2Hyperplane(
-                    self.param['feature_size'] if not args.final_2dim else 2,
-                    args.n_classes
-                )
+                self.network_class = \
+                    MobiusDist2Hyperplane(self.feature_dim if not args.final_2dim else 2, args.n_classes)
             else:
-                self.network_class = nn.Linear(self.param['feature_size'], args.n_classes)
+                self.network_class = nn.Linear(self.feature_dim, args.n_classes)
         if not args.use_labels or self.args.linear_input == 'predictions_z_hat':
             self.network_pred = nn.Sequential(
-                                    nn.Conv2d(self.param['feature_size'], self.param['feature_size'], kernel_size=1, padding=0),
+                                    nn.Conv2d(self.feature_dim, self.feature_dim, kernel_size=1, padding=0),
                                     nn.ReLU(inplace=True),
-                                    nn.Conv2d(self.param['feature_size'], self.param['feature_size'],
-                                              kernel_size=1, padding=0)
+                                    nn.Conv2d(self.feature_dim, self.feature_dim, kernel_size=1, padding=0)
                                     )
             self._initialize_weights(self.network_pred)
 
         # If the task is predicting the last subaction, we need some indexing of how far it is
-        if self.args.early_action_self:
-            self.time_index = nn.Embedding(self.args.num_seq, self.param['feature_size'])
+        if self.args.early_action_self or (self.args.early_action and not self.args.action_level_gt):
+            self.time_index = nn.Embedding(self.args.num_seq, self.feature_dim)
 
         self.mask = None
         self.relu = nn.ReLU(inplace=False)
@@ -98,8 +101,12 @@ class Model(nn.Module):
 
         block = block.view(B*N, C, SL, H, W)
         feature = self.backbone(block)
+        feature = self.adapt_dim(feature.permute(0,2,3,4,1)).permute(0,4,1,2,3)
         del block
         feature = F.avg_pool3d(feature, (self.last_duration, 1, 1), stride=(1, 1, 1))
+        if self.args.no_spatial:
+            feature = feature.mean(dim=[-1, -2], keepdims=True)
+            self.last_size = 1
 
         if self.args.hyperbolic:
             feature_reshape = feature.permute(0, 2, 3, 4, 1)
@@ -124,19 +131,19 @@ class Model(nn.Module):
             feature_dist = feature_g = feature
 
         # before ReLU, (-inf, +inf)
-        feature_dist = feature_dist.view(B, N, 2 if self.args.final_2dim else self.param['feature_size'],
+        feature_dist = feature_dist.view(B, N, 2 if self.args.final_2dim else self.feature_dim,
                                          self.last_size, self.last_size)
         feature_predict_from = feature_dist  # To train linear layer on top of
         # And these are the features we have to "predict to" (in the self-supervised setting)
         feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
         feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2,
-                                                               2 if self.args.final_2dim else self.param['feature_size'])  # .transpose(0,1)
+                                                               2 if self.args.final_2dim else self.feature_dim)  # .transpose(0,1)
 
         # ----------- STEP 2: compute predictions ------- #
 
         feature = self.relu(feature_g)  # [0, +inf)
         # [B,N,D,6,6], [0, +inf)
-        feature = feature.view(B, N, self.param['feature_size'], self.last_size, self.last_size)
+        feature = feature.view(B, N, self.feature_dim, self.last_size, self.last_size)
 
         # If the task is predicting the last subaction, we need some indexing of how far it is
         if self.args.early_action_self or (self.args.early_action and not self.args.action_level_gt):

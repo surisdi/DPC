@@ -94,7 +94,7 @@ class AverageMeter(object):
         self.history = []
         self.dict = {}  # save all data values here
         self.save_dict = {}  # save mean and std here, for summary table
-        self.avg_expanded = np.array([0])
+        self.avg_expanded = None
 
     def update(self, val, n=1, history=0, step=5):
         is_array = False
@@ -112,11 +112,13 @@ class AverageMeter(object):
             pass
         else:
             raise TypeError(f'{type(val)} type not supported in AverageMeter')
+
         if type(n) == torch.Tensor:
             n = n.float().mean().item()
         self.val = np.mean(val)
         self.sum += val * n
         self.count += n
+        # self.avg = self.sum / self.count
         if is_array:
             self.avg_expanded = self.sum / self.count
             self.avg = self.avg_expanded.mean()
@@ -207,13 +209,11 @@ def neq_load_customized(args, model, pretrained_dict,
             print_r(args, '===================================\n')
 
     del pretrained_dict
-    model_dict.update(tmp)
-    del tmp
-    if 'time_index.weight' in model_dict and \
+    if 'time_index.weight' in tmp and \
             'time_index' in [a[0].split('.')[0] for a in list(model.named_parameters())] and \
-            model.time_index.weight.shape[0] < model_dict['time_index.weight'].shape[0]:
-        model_dict['time_index.weight'].data = model_dict['time_index.weight'][:model.time_index.weight.shape[0]].data
-    model.load_state_dict(model_dict, strict=False)
+            model.time_index.weight.shape[0] < tmp['time_index.weight'].shape[0]:
+        tmp['time_index.weight'].data = tmp['time_index.weight'][:model.time_index.weight.shape[0]].data
+    model.load_state_dict(tmp, strict=False)
     return model
 
 

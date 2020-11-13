@@ -42,6 +42,9 @@ def get_args():
                         choices=['features_z', 'predictions_c', 'predictions_z_hat'])
     parser.add_argument('--network_feature', default='resnet18', type=str, help='Network to use for feature extraction')
     parser.add_argument('--final_2dim', action='store_true', help='Feature space with dimensionality 2')
+    parser.add_argument('--feature_dim', default=-1, type=int,
+                        help='Feature dimensionality. -1 implies same as output of resnet')
+    parser.add_argument('--not_track_running_stats', action='store_true', help='For the resnet')
     # Loss
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
     parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
@@ -129,6 +132,9 @@ def get_args():
     if args.test:
         torch.backends.cudnn.deterministic = True
 
+    if args.not_track_running_stats:
+        assert args.batch_size > 1
+
     return args
 
 
@@ -178,14 +184,15 @@ def main():
         if os.path.isfile(args.pretrain):
             print_r(args, f"=> loading pretrained checkpoint '{args.pretrain}'")
             checkpoint = torch.load(args.pretrain, map_location=torch.device('cpu'))
-            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all', size_diff=args.final_2dim)
+            model = neq_load_customized(args, model, checkpoint['state_dict'], parts='all',
+                                        size_diff=args.final_2dim or args.feature_dim != -1)
             print_r(args, f"=> loaded pretrained checkpoint '{args.pretrain}' (epoch {checkpoint['epoch']})")
         else:
             print_r(args, f"=> no checkpoint found at '{args.pretrain}'", print_no_verbose=True)
 
         if args.only_train_linear:
             for name, param in model.named_parameters():  # deleted 'module'
-                if not 'network_class' in name:
+                if 'network_class' not in name:
                     param.requires_grad = False
         print_r(args, '\n==== parameter names and whether they require gradient ====\n')
         for name, param in model.named_parameters():
@@ -194,6 +201,7 @@ def main():
 
     if args.local_rank != -1:
         from torch.nn.parallel import DistributedDataParallel as DDP
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model) if not args.not_track_running_stats else model
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
         args.parallel = 'ddp'
     elif args.n_gpu > 1:

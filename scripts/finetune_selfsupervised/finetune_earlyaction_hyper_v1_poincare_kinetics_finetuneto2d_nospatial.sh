@@ -11,7 +11,7 @@ main.py \
 --hyperbolic_version 1 \
 --distance squared \
 --network_feature resnet18 \
---dataset finegym \
+--dataset k600 \
 --seq_len 5 \
 --num_seq 6 \
 --ds 3 \
@@ -22,11 +22,13 @@ main.py \
 --fp64_hyper \
 --num_workers 12 \
 --lr 0.001 \
---prefix finetune_earlyaction_self_hyper_v1_poincare_finegym_2dim_nospatial \
+--prefix finetune_earlyaction_hyper_v1_poincare_kinetics_2dim_nospatial \
 --cross_gpu_score \
 --early_action \
 --early_action_self \
---pretrain logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym_2dim/20201103_135631/model/model_best_epoch5.pth.tar \
+--pretrain logs/log_train_earlyaction_hyper_v1_poincare_kinetics_lr4/20201023_151021/model/model_best_epoch31.pth.tar \
 --final_2dim \
 --no_spatial \
---path_dataset /proj/vondrick/datasets/FineGym 
+--path_dataset /local/vondrick/didacsuris/local_data/kinetics-600/data \
+--partial 0.1 \
+#--resume logs/log_finetune_earlyaction_hyper_v1_poincare_kinetics_2dim_nospatial/20201104_133510/model/model_best_epoch4.pth.tar

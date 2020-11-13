@@ -54,10 +54,6 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
         loss = torch.nn.functional.cross_entropy(pred, gt, ignore_index=-1)
 
         accuracies = (torch.argmax(pred, dim=1) == gt).float()
-        if args.early_action:
-            accuracy = accuracies.view(B, -1).mean(0)
-        else:
-            accuracy = accuracies.mean()
 
     else:
         # train with multiple positive labels
@@ -78,7 +74,7 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
         gt[indices, labels] = 1
 
         loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
-        accuracy = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float().mean()
+        accuracies = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float()
 
         hier_accuracies = []
         for top_down in [True, False]:
@@ -96,6 +92,11 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
                     reward = reward / 2
                 hier_accuracies.append(hier_accuracy)
         hier_accuracies = torch.tensor(hier_accuracies)
+
+    if args.early_action:
+        accuracy = accuracies.view(B, -1).mean(0)
+    else:
+        accuracy = accuracies.mean()
 
     results = accuracy, hier_accuracies, loss.item(), labels.shape[0]
     return results, loss
@@ -163,9 +164,6 @@ def compute_scores(args, pred, feature_dist, sizes, B):
         score = torch.matmul(pred, feature_dist.transpose(0, 1))
         score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
 
-    if args.no_spatial:
-        score = score.mean(dim=[2, 5])
-
     return score
 
 
@@ -205,10 +203,6 @@ def compute_mask(args, sizes, B):
     (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]
     target = mask == 1
     target.requires_grad = False
-
-    if args.no_spatial:
-        target = target[:, :, 0, :, :, 0]
-        SQ = 1
 
     return target, (B, B2, NS, NP, SQ)
 

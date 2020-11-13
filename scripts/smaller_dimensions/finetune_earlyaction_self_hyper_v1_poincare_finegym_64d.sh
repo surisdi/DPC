@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+# This is the number 03 in the list
 CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9997 \
+--master_port=9978 \
 --nproc_per_node=4 \
 main.py \
 --pred_step 1 \
@@ -20,13 +21,13 @@ main.py \
 --epochs 200 \
 --fp16 \
 --fp64_hyper \
---num_workers 12 \
---lr 0.001 \
---prefix finetune_earlyaction_self_hyper_v1_poincare_finegym_2dim_nospatial \
+--num_workers 15 \
+--lr 0.0001 \
+--prefix finetune_earlyaction_self_hyper_v1_poincare_finegym_64d \
 --cross_gpu_score \
 --early_action \
 --early_action_self \
---pretrain logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym_2dim/20201103_135631/model/model_best_epoch5.pth.tar \
---final_2dim \
---no_spatial \
---path_dataset /proj/vondrick/datasets/FineGym 
+--feature_dim 64 \
+--pretrain logs/log_train_dpc_kinetics_hyperv1_64d/20201107_173841/model/model_best_epoch5.pth.tar \
+--path_dataset /proj/vondrick/datasets/FineGym \
+--resume logs/log_finetune_earlyaction_self_hyper_v1_poincare_finegym_64d/20201109_201936/model/model_best_epoch104.pth.tar

@@ -17,7 +17,7 @@ main.py \
 --lr 1e-3 \
 --prefix test_future_subaction_linear_finegym_kinetics_euclidean \
 --fp16 \
---pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_euclidean_lr3/20201031_204139/model/model_best_epoch58.pth.tar  \
+--pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_euclidean_lr3/20201031_204139/model/epoch100.pth.tar  \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \

@@ -3,27 +3,23 @@ CUDA_VISIBLE_DEVICES=2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
---master_port=9996 \
+--master_port=9997 \
 --nproc_per_node=2 \
 main.py \
 --network_feature resnet18 \
---dataset finegym \
---batch_size 128 \
+--dataset hollywood2 \
+--batch_size 32 \
 --img_dim 128 \
 --epochs 100 \
---hyperbolic \
---hyperbolic_version 1 \
 --pred_step 0 \
 --seq_len 5 \
 --num_seq 6 \
---distance 'squared' \
---lr 1e-2 \
---prefix earlyaction_linear_finegym_kinetics_fromfinetune_lr2 \
+--lr 1e-3 \
+--prefix earlyaction_linear_hollywood2_movienet_fromfinetune_euclidean_lr3 \
 --fp16 \
---fp64_hyper \
---pretrain logs/log_earlyaction_linear_finegym_kinetics_fromfinetune_lr2/20201101_192504/model/model_best_epoch91.pth.tar \
+--pretrain logs/log_earlyaction_linear_hollywood2_movienet_fromfinetune_euclidean_lr3/20201105_174333/model/model_best_epoch28.pth.tar \
 --linear_input predictions_z_hat \
---n_classes 307 \
+--n_classes 17 \
 --use_labels \
 --num_workers 15 \
 --only_train_linear \
@@ -31,5 +27,7 @@ main.py \
 --num_workers 8 \
 --seed 0 \
 --action_level_gt \
---test \
---path_dataset /proj/vondrick/datasets/FineGym
+--hierarchical_labels \
+--path_dataset /proj/vondrick/datasets/Hollywood2/ \
+--not_track_running_stats \
+--test

@@ -9,7 +9,7 @@ from tqdm import tqdm
 import losses
 import random
 from utils.utils import save_checkpoint, AverageMeter
-from visualization import generate_embeddings
+import visualization
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -58,7 +58,15 @@ class Trainer:
                 print('Accuracies test:')
                 print(accuracies_test)
         elif self.args.test_info == 'generate_embeddings':
-            generate_embeddings.main(self)
+            visualization.generate_embeddings.main(self)
+        elif self.args.test_info == 'viz_trajectories':
+            visualization.viz_trajectories.main(self)
+        elif self.args.test_info == 'viz_improvement':
+            visualization.viz_improvement.main(self)
+        elif self.args.test_info == 'viz_gradcam':
+            visualization.viz_gradcam.main(self)
+        else:
+            print(f'Test {self.args.test_info} is not implemented')
 
     def run_epoch(self, epoch, train=True, return_all_acc=False):
         if self.args.device == "cuda":
@@ -75,9 +83,9 @@ class Trainer:
 
         loader = self.loaders['train' if train else ('val' if epoch is not None else 'test')]
         desc = f'Training epoch {epoch}' if train else (f'Evaluating epoch {epoch}' if epoch is not None else 'Testing')
-        stop_total = int(len(loader) * (self.args.partial if train else 1.0))
+        stop_total = int(len(loader) * (self.args.partial))  # if train else 1.0))
         with tqdm(loader, desc=desc, disable=self.args.local_rank > 0, total=stop_total) as t:
-            for idx, (input_seq, labels) in enumerate(t):
+            for idx, (input_seq, labels, *_) in enumerate(t):
                 if idx >= stop_total:
                     break
                 # Measure data loading time
@@ -150,6 +158,12 @@ class Trainer:
                     self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)
 
             return accuracy_list if return_all_acc else accuracy_list['accuracy']
+
+    def get_base_model(self):
+        if 'DataParallel' in str(type(self.model)):  # both the ones from apex and from torch.nn
+            return self.model.module
+        else:
+            return self.model
 
 
 def gather_tensor(v):

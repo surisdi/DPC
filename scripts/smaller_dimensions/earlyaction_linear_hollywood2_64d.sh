@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-CUDA_VISIBLE_DEVICES=5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
 -W ignore \
 -i \
 -m torch.distributed.launch \
 --master_port=9985 \
---nproc_per_node=3 \
+--nproc_per_node=4 \
 main.py \
 --network_feature resnet18 \
---dataset finegym \
+--dataset hollywood2 \
 --batch_size 32 \
 --img_dim 128 \
 --epochs 100 \
@@ -18,19 +18,19 @@ main.py \
 --num_seq 6 \
 --distance 'squared' \
 --lr 1e-2 \
---prefix future_subaction_linear_finegym_kinetics_fromfinetune_lr2 \
+--prefix earlyaction_linear_hollywood2_64d \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_finetune_dpc_self_hyper_v1_poincare_finegym_fromearlyaction/20201028_122531/model/model_best_epoch7.pth.tar \
+--pretrain logs/log_finetune_earlyaction_hyper_v1_poincare_hollywood2_64d/20201109_201344/model/model_best_epoch201.pth.tar \
 --linear_input predictions_z_hat \
---n_classes 307 \
---hierarchical_labels \
+--n_classes 17 \
 --use_labels \
 --num_workers 15 \
 --only_train_linear \
---pred_future \
+--early_action \
 --num_workers 8 \
 --seed 0 \
---path_dataset /proj/vondrick/datasets/FineGym \
---debug
-
+--action_level_gt \
+--hierarchical_labels \
+--feature_dim 64 \
+--path_dataset /local/vondrick/didacsuris/Hollywood2

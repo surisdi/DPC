@@ -197,8 +197,10 @@ class Kinetics600_full_3d(data.Dataset):
 
         self.video_info = video_info.drop(drop_idx, axis=0)
 
-        if mode == 'val': self.video_info = self.video_info.sample(frac=0.3, random_state=666)
-        if self.unit_test: self.video_info = self.video_info.sample(32, random_state=666)
+        if mode == 'val':
+            self.video_info = self.video_info.sample(frac=0.3, random_state=666)
+        if mode == 'test' and True:  #self.unit_test:
+            self.video_info = self.video_info.sample(1000, random_state=666)
         # shuffle not necessary because use RandomSampler
 
     def idx_sampler(self, vlen, vpath):
@@ -218,7 +220,8 @@ class Kinetics600_full_3d(data.Dataset):
         while items is None or items[0] is None:
             index = random.randint(0, len(self.video_info) - 1)
             vpath, vlen = self.video_info.iloc[index]
-            vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
+            # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
             items = self.idx_sampler(vlen, vpath)
 
         idx_block, vpath = items
@@ -233,7 +236,8 @@ class Kinetics600_full_3d(data.Dataset):
         while items is None or items[0] is None:
             index = random.randint(0, len(self.video_info)-1)
             vpath, vlen = self.video_info.iloc[index]
-            vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
+            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
+            # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
             items = self.idx_sampler(vlen, vpath)
 
         idx_block, vpath = items
@@ -472,6 +476,7 @@ class Hollywood2(data.Dataset):
         vpath, vlen = self.video_info.iloc[index]
         action = self.labels[vpath.split('/')[-1]]
         label = torch.LongTensor([int(self.dict_labels[action])])
+
         # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
@@ -494,8 +499,10 @@ class Hollywood2(data.Dataset):
                 labels.append(torch.LongTensor([int(self.dict_labels_hier[action])]))
                 actions.append(action)
                 action = self.parent_nodes[action][0]
-            return t_seq, torch.cat(labels)
-        return t_seq, torch.tensor(-1)
+            labels = torch.cat(labels)
+        else:
+            labels = torch.tensor(-1)
+        return t_seq, labels, index
 
     def __len__(self):
         return len(self.video_info)
@@ -618,7 +625,7 @@ class FineGym(data.Dataset):
         clipidx = self.idx2clipidx[index]
         segments = self.clips[clipidx]
 
-        return clipidx, segments
+        return clipidx, segments, index
 
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
@@ -682,7 +689,7 @@ class FineGym(data.Dataset):
             labels_to_consider = labels[:, -1][labels[:, -1] != -1]
             if len(labels_to_consider) > 0:
                 assert torch.all(labels_to_consider == labels_to_consider[0]), 'What is going on?'
-                labels = labels_to_consider[0]  # TODO add this when training new models - 288 - 15
+                labels = labels_to_consider[0] - 288 - 15
             else:
                 labels = torch.tensor(-1)
 
@@ -696,7 +703,7 @@ class FineGym(data.Dataset):
             labels = torch.tensor(-1)
         if self.return_idx:
             return video, labels, index
-        return video, labels
+        return video, labels, index
 
     def __len__(self):
         return len(self.clips)
@@ -760,7 +767,7 @@ class MovieNet(data.Dataset):
         subclip_idxs, video_idx, seq_idx = self.subclip_seqs[index]
         video = self.read_video(subclip_idxs, video_idx)
         label = torch.tensor(-1)
-        return video, label
+        return video, label, index
 
     def __len__(self):
         return len(self.subclip_seqs)
@@ -819,7 +826,8 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                             downsample=args.ds,
                             return_label=return_label)
     elif args.dataset == 'hollywood2':
-        assert action_level_gt, 'hollywood2 does not have subaction labels'
+        if return_label:
+            assert action_level_gt, 'hollywood2 does not have subaction labels'
         dataset = Hollywood2(mode=mode,
                              transform=transform,
                              seq_len=args.seq_len,

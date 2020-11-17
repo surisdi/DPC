@@ -596,12 +596,28 @@ class FineGym(data.Dataset):
 
         self.clips = {}  # Actual clips used in the dataset, with its actions
         for clip in clips:
+            if clip.startswith('.'):
+                continue
             if self.return_label and clip not in clips_in_labels:  # For gym288, this filters out almost 2/3 of the data
                 continue
             assert len(clip) == 27  # youtube ID is 11, event ID is 15, and the separation
             video_id = clip[:11]
             event_id = clip[12:]
             segments = self.annotations[video_id][event_id]['segments']
+
+            # # ######### TODO remove this. Only for figure
+            # video_name = 'rrrgsW--AE8'
+            # grand_class = 3
+            # if segments is None or len(segments) == 0:
+            #     continue
+            # action_id = clip + '_' + list(segments.keys())[0]
+            # if action_id not in self.subclipidx2label:
+            #     continue
+            # if not (int(self.super_classes[self.subclipidx2label[action_id]][1]) == grand_class) \
+            #         or not clip.startswith(video_name):
+            #     continue
+            # ####################
+
             if segments is not None and (
                     # This is filtering out several short videos, approx 1/3 of the remaining videos for self.num_seq=6
                     len(segments) >= self.num_seq if self.return_label else
@@ -629,7 +645,7 @@ class FineGym(data.Dataset):
 
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
-        if self.mode == 'train':
+        if self.mode == 'train' and False:  # TODO change
             start = random.randint(0, len(segments) - self.num_seq)
         else:
             start = (len(segments) - self.num_seq) // 2

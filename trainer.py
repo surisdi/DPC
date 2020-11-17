@@ -85,7 +85,7 @@ class Trainer:
         desc = f'Training epoch {epoch}' if train else (f'Evaluating epoch {epoch}' if epoch is not None else 'Testing')
         stop_total = int(len(loader) * (self.args.partial))  # if train else 1.0))
         with tqdm(loader, desc=desc, disable=self.args.local_rank > 0, total=stop_total) as t:
-            for idx, (input_seq, labels, *_) in enumerate(t):
+            for idx, (input_seq, labels, *indices) in enumerate(t):
                 if idx >= stop_total:
                     break
                 # Measure data loading time
@@ -112,7 +112,7 @@ class Trainer:
                             self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
                         loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
-                                                             self.sizes_mask, labels.shape[0])
+                                                             self.sizes_mask, labels.shape[0], indices, self)    # TODO remove indices
                     else:
                         loss, results = output_model
                     losses.bookkeeping(self.args, avg_meters, results)

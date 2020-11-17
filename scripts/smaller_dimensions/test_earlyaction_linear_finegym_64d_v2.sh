@@ -21,7 +21,7 @@ main.py \
 --prefix earlyaction_linear_finegym_64d \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_earlyaction_linear_finegym_64d_v2/20201112_113024/model/model_best_epoch30.pth.tar \
+--pretrain logs/log_earlyaction_linear_finegym_64d_v2/20201112_113024/model/model_best_epoch94.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --use_labels \

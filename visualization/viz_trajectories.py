@@ -9,6 +9,49 @@ import itertools
 from tqdm import tqdm
 
 
+# Arguments in the code of the commit "code at time of submission at CVPR 2021"
+# --pred_step
+# 1
+# --hyperbolic
+# --hyperbolic_version
+# 1
+# --distance
+# squared
+# --network_feature
+# resnet18
+# --dataset
+# k600
+# --seq_len
+# 5
+# --num_seq
+# 8
+# --ds
+# 3
+# --batch_size
+# 32
+# --img_dim
+# 128
+# --fp16
+# --fp64_hyper
+# --num_workers
+# 15
+# --prefix
+# viz
+# --cross_gpu_score
+# --early_action
+# --early_action_self
+# --pretrain
+# logs/log_train_earlyaction_hyper_v1_poincare_kinetics_lr4/20201023_151021/model/model_best_epoch31.pth.tar
+# --path_dataset
+# /local/vondrick/didacsuris/local_data/kinetics-600/data
+# --test
+# --test_info
+# viz_trajectories
+# --viz
+# --cross_gpu_score
+# --not_track_running_stats
+
+
 def main(trainer):
 
     print('\n==== Visualizing trajectories ====\n')
@@ -145,13 +188,13 @@ def main(trainer):
     plt.gca().set_ylim(y_min-0.1, y_max+0.05)
     plt.gca().set_aspect('equal', adjustable='box')
     ax.add_artist(plt.Circle((0, 0), radius, fc='none', ec='k'))
-    ax.add_artist(plt.Circle((0, 0), radius*0.9, fc='none', ec='k', alpha=0.05))
-    ax.add_artist(plt.Circle((0, 0), radius*0.8, fc='none', ec='k', alpha=0.05))
-    ax.add_artist(plt.Circle((0, 0), radius*0.7, fc='none', ec='k', alpha=0.05))
+    ax.add_artist(plt.Circle((0, 0), radius*0.9, fc='none', ec='k', alpha=0.1))
+    ax.add_artist(plt.Circle((0, 0), radius*0.8, fc='none', ec='k', alpha=0.1))
+    ax.add_artist(plt.Circle((0, 0), radius*0.7, fc='none', ec='k', alpha=0.1))
     angle = 8
-    ax.annotate('0.7', (radius * 0.7 * np.cos(angle*np.pi/180)-0.005, radius * 0.7 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.3, rotation=angle, fontsize=5)
-    ax.annotate('0.8', (radius * 0.8 * np.cos(angle*np.pi/180)-0.005, radius * 0.8 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.3, rotation=angle, fontsize=5)
-    ax.annotate('0.9', (radius * 0.9 * np.cos(angle*np.pi/180)-0.005, radius * 0.9 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.3, rotation=angle, fontsize=5)
+    ax.annotate('0.7', (radius * 0.7 * np.cos(angle*np.pi/180)-0.005, radius * 0.7 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.5, rotation=angle, fontsize=5)
+    ax.annotate('0.8', (radius * 0.8 * np.cos(angle*np.pi/180)-0.005, radius * 0.8 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.5, rotation=angle, fontsize=5)
+    ax.annotate('0.9', (radius * 0.9 * np.cos(angle*np.pi/180)-0.005, radius * 0.9 * np.sin(angle*np.pi/180)-0.005), color='k', alpha=0.5, rotation=angle, fontsize=5)
     ax.axis('off')
     plt.show()
     plt.savefig(f'/proj/vondrick/didac/results/2dim/trajectories_{"2dim" if trainer.args.final_2dim else ""}.pdf')

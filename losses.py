@@ -9,12 +9,12 @@ from datasets import sizes_hierarchy as sh
 from utils.poincare_distance import poincare_distance
 
 
-def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B):
+def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B, indices=None, trainer=None):
 
     if args.use_labels:
         results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
-        results, loss = compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B)
+        results, loss = compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B, indices, trainer)
 
     to_return = [loss] + [torch.tensor(r).cuda() for r in results]
     return to_return
@@ -102,8 +102,8 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
     return results, loss
 
 
-def compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B):
-    score = compute_scores(args, pred, feature_dist, sizes_pred, B)
+def compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B, indices, trainer):
+    score = compute_scores(args, pred, feature_dist, sizes_pred, B, indices, trainer)
 
     _, B2, NS, NP, SQ = sizes_mask
     # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
@@ -145,11 +145,47 @@ def compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, si
     return results, loss
 
 
-def compute_scores(args, pred, feature_dist, sizes, B):
+def compute_scores(args, pred, feature_dist, sizes, B, indices=None, trainer=None):
     last_size, size_gt, size_pred = sizes.cpu().numpy()
-
     if args.hyperbolic:
         score = poincare_distance(pred, feature_dist)
+
+        # from shutil import copyfile
+        # import os
+        # score_ = score.view(B, size_pred, last_size ** 2, B, 6, last_size ** 2)[:, :, range(16), :, :, range(16)].mean(
+        #     0)
+        # source_file_element = '/proj/vondrick/datasets/FineGym/action_videos'
+        # source_file = '/proj/vondrick/datasets/FineGym/event_videos'
+        #
+        # for id in range(50):
+        #     dst_file = f'/proj/vondrick/didac/results/fig8/{id}'
+        #     os.makedirs(dst_file, exist_ok=True)
+        #     query_name = trainer.loaders["test"].dataset.idx2clipidx[indices[0][id].cpu().item()]
+        #     copyfile(source_file + f'/{query_name}.mp4', dst_file + f'/query_{query_name}.mp4')
+        #     print(id, (score_ <= score_[id, -1].min())[id].sum(dim=[-2, -1]))
+        #     list_min = score_[id, -1].view(-1).argsort()
+        #
+        #     # action gt
+        #     segments = trainer.loaders['test'].dataset.clips[query_name]
+        #     segments_keys = list(segments.keys())
+        #     start = (len(segments) - trainer.loaders['test'].dataset.num_seq) // 2
+        #     segments_keys = segments_keys[start:start + trainer.loaders['test'].dataset.num_seq]
+        #     segment_key = segments_keys[-1]
+        #     action_id = query_name + '_' + segment_key
+        #     copyfile(source_file_element + f'/{action_id}.mp4', dst_file + f'/ground_truth_{i:02d}_{action_id}.mp4')
+        #
+        #     for i, element in enumerate(list_min[:15]):
+        #         video_min, clip_min = element // 6, element % 6
+        #         idx = indices[0][video_min]
+        #         clipidx = trainer.loaders['test'].dataset.idx2clipidx[idx.cpu().item()]
+        #         segments = trainer.loaders['test'].dataset.clips[clipidx]
+        #         segments_keys = list(segments.keys())
+        #         start = (len(segments) - trainer.loaders['test'].dataset.num_seq) // 2
+        #         segments_keys = segments_keys[start:start + trainer.loaders['test'].dataset.num_seq]
+        #         segment_key = segments_keys[clip_min.cpu().item()]
+        #         action_id = clipidx + '_' + segment_key
+        #         copyfile(source_file_element + f'/{action_id}.mp4', dst_file + f'/target_{i:02d}_{action_id}.mp4')
+
         if args.distance == 'squared':
             score = score.pow(2)
         elif args.distance == 'cosh':

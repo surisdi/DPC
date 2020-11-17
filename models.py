@@ -135,9 +135,14 @@ class Model(nn.Module):
                                          self.last_size, self.last_size)
         feature_predict_from = feature_dist  # To train linear layer on top of
         # And these are the features we have to "predict to" (in the self-supervised setting)
+
+        # TODO uncomment!
         feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
         feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2,
                                                                2 if self.args.final_2dim else self.feature_dim)  # .transpose(0,1)
+
+        # TODO remove
+        # feature_dist = feature_dist.permute(0, 1, 3, 4, 2).reshape(-1, self.feature_dim)
 
         # ----------- STEP 2: compute predictions ------- #
 

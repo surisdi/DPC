@@ -12,11 +12,12 @@ from utils.poincare_distance import poincare_distance
 def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B, indices=None, trainer=None):
 
     if args.use_labels:
-        results, loss = compute_supervised_loss(args, pred, labels, B)
+        # results, loss = compute_supervised_loss(args, pred, labels, B)  # TODO go back to notrmal
+        to_return = compute_supervised_loss(args, pred, labels, B)
     else:
         results, loss = compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B, indices, trainer)
 
-    to_return = [loss] + [torch.tensor(r).cuda() for r in results]
+    # to_return = [loss] + [torch.tensor(r).cuda() for r in results]   # TODO go back to notrmal
     return to_return
 
 
@@ -66,15 +67,35 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
         else:  # Options 2
             labels = labels.to(args.device)
 
-        pred = pred[labels[:, 0] != -1]
-        labels = labels[labels[:, 0] != -1]
+        # pred = pred[labels[:, 0] != -1]
+        # labels = labels[labels[:, 0] != -1]
+        #
+        # gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
+        # indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
+        # gt[indices, labels] = 1
+        #
+        # loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
+        # accuracies = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float()
 
-        gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
-        indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
-        gt[indices, labels] = 1
+        # TODO remove this
+        i = 0
+        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+        a = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+        i = 1
+        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+        b = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+        i = 2
+        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+        c = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
 
-        loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
-        accuracies = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float()
+
+
+        # a = a.view(labels.shape[0]//6, 6)[:, 3]
+        # b = b.view(labels.shape[0]//6, 6)[:, 3]
+        # labels = labels.view(labels.shape[0]//6, 6, 2)[:, 3]
+
+        return a, b, c, labels
+        #####
 
         hier_accuracies = []
         for top_down in [True, False]:

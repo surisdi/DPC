@@ -81,9 +81,21 @@ class Trainer:
 
         time_last = time.time()
 
-        loader = self.loaders['train' if train else ('val' if epoch is not None else 'test')]
+        loader = self.loaders['train' if train else ('val' if epoch is not None else 'val')]
         desc = f'Training epoch {epoch}' if train else (f'Evaluating epoch {epoch}' if epoch is not None else 'Testing')
         stop_total = int(len(loader) * (self.args.partial))  # if train else 1.0))
+
+
+
+        a_total = []
+        b_total = []
+        c_total = []
+        labels_total = []
+        radius_total = []
+        indices_total = []
+
+
+
         with tqdm(loader, desc=desc, disable=self.args.local_rank > 0, total=stop_total) as t:
             for idx, (input_seq, labels, *indices) in enumerate(t):
                 if idx >= stop_total:
@@ -96,68 +108,96 @@ class Trainer:
                 # Get sequence predictions
                 with autocast(enabled=self.args.fp16):
                     with torch.set_grad_enabled(train):
-                        output_model = self.model(input_seq, labels)
+                        output_model, radius = self.model(input_seq, labels)
 
-                    if self.args.cross_gpu_score:
-                        pred, feature_dist, sizes_pred = output_model
-                        sizes_pred = sizes_pred.float().mean(0).int()
+                a, b, c, labels = output_model
+                a_total.append(a)
+                b_total.append(b)
+                c_total.append(c)
+                labels_total.append(labels)
+                radius_total.append(radius)
+                indices_total.append(indices[0])
+                continue
 
-                        if self.args.parallel == 'ddp':
-                            tensors_to_gather = [pred, feature_dist, labels]
-                            for i, v in enumerate(tensors_to_gather):
-                                tensors_to_gather[i] = gather_tensor(v)
-                            pred, feature_dist, labels = tensors_to_gather
+            #         if self.args.cross_gpu_score:
+            #             pred, feature_dist, sizes_pred = output_model
+            #             sizes_pred = sizes_pred.float().mean(0).int()
+            #
+            #             if self.args.parallel == 'ddp':
+            #                 tensors_to_gather = [pred, feature_dist, labels]
+            #                 for i, v in enumerate(tensors_to_gather):
+            #                     tensors_to_gather[i] = gather_tensor(v)
+            #                 pred, feature_dist, labels = tensors_to_gather
+            #
+            #             if self.target is None:
+            #                 self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
+            #
+            #             loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
+            #                                                  self.sizes_mask, labels.shape[0], indices, self)    # TODO remove indices
+            #         else:
+            #             loss, results = output_model
+            #         losses.bookkeeping(self.args, avg_meters, results)
+            #
+            #     del input_seq
+            #
+            #     if train:
+            #         # Backward pass
+            #         scaled_loss = self.scaler.scale(loss.mean())
+            #         scaled_loss.backward()
+            #         self.scaler.unscale_(self.optimizer)
+            #         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            #         self.scaler.step(self.optimizer)
+            #         self.scaler.update()
+            #         self.optimizer.zero_grad()
+            #
+            #     del loss
+            #
+            #     avg_meters['batch_time'].update(time.time() - time_last)
+            #     time_last = time.time()
+            #
+            #     # ------------- Show information ------------ #
+            #     postfix_kwargs = {k: v.val for k, v in avg_meters.items() if v.count > 0}
+            #     t.set_postfix(**postfix_kwargs)
+            #
+            #     if train and self.args.local_rank <= 0:
+            #         acuracy_list_train = {k: v for k, v in postfix_kwargs.items() if 'time' not in k}
+            #         self.iteration += 1
+            #         if self.iteration % self.args.print_freq == 0 and self.writers['train'] and not self.args.debug:
+            #             num_outer_samples = (self.iteration + 1) * self.args.batch_size * \
+            #                                 (1 if 'Parallel' in str(type(self.model)) else self.args.step_n_gpus)
+            #             self.writers['train'].add_scalars('train', {**acuracy_list_train}, num_outer_samples)
+            #
+            # accuracy_list = {k: v.local_avg if train else v.avg for k, v in avg_meters.items()
+            #                  if v.count > 0 and 'time' not in k}
+            #
+            # if not train and self.args.local_rank <= 0:
+            #     print(f'[{epoch}/{self.args.epochs}]' +
+            #           ''.join([f'{k}: {", ".join([f"{v_:.04f}" for v_ in v.avg_expanded])}, '
+            #                    for k, v in avg_meters.items() if v.count > 0]))
+            #     if not self.args.debug:
+            #         self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
+            #         self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)
+            #
+            # return accuracy_list if return_all_acc else accuracy_list['accuracy']
 
-                        if self.target is None:
-                            self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
+        a_total = torch.cat(a_total)
+        b_total = torch.cat(b_total)
+        c_total = torch.cat(c_total)
+        labels_total = torch.cat(labels_total)
+        radius_total = torch.cat(radius_total)
 
-                        loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
-                                                             self.sizes_mask, labels.shape[0], indices, self)    # TODO remove indices
-                    else:
-                        loss, results = output_model
-                    losses.bookkeeping(self.args, avg_meters, results)
+        idxs_total = []
+        for index in torch.cat(indices_total):
+            clip_idx = self.loaders['test'].dataset.idx2clipidx[index.item()]
+            segments = self.loaders['test'].dataset.clips[clip_idx]
+            start = (len(segments) - self.loaders['test'].dataset.num_seq) // 2
+            action = list(segments.keys())[start+self.loaders['test'].dataset.num_seq-1]
+            idxs_total.append(clip_idx + '_' + action)
 
-                del input_seq
+            # vpath, vlen = self.loaders['test'].dataset.video_info.iloc[index.item()]
+            # idxs_total.append(vpath)
 
-                if train:
-                    # Backward pass
-                    scaled_loss = self.scaler.scale(loss.mean())
-                    scaled_loss.backward()
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                    self.optimizer.zero_grad()
-
-                del loss
-
-                avg_meters['batch_time'].update(time.time() - time_last)
-                time_last = time.time()
-
-                # ------------- Show information ------------ #
-                postfix_kwargs = {k: v.val for k, v in avg_meters.items() if v.count > 0}
-                t.set_postfix(**postfix_kwargs)
-
-                if train and self.args.local_rank <= 0:
-                    acuracy_list_train = {k: v for k, v in postfix_kwargs.items() if 'time' not in k}
-                    self.iteration += 1
-                    if self.iteration % self.args.print_freq == 0 and self.writers['train'] and not self.args.debug:
-                        num_outer_samples = (self.iteration + 1) * self.args.batch_size * \
-                                            (1 if 'Parallel' in str(type(self.model)) else self.args.step_n_gpus)
-                        self.writers['train'].add_scalars('train', {**acuracy_list_train}, num_outer_samples)
-
-            accuracy_list = {k: v.local_avg if train else v.avg for k, v in avg_meters.items()
-                             if v.count > 0 and 'time' not in k}
-
-            if not train and self.args.local_rank <= 0:
-                print(f'[{epoch}/{self.args.epochs}]' +
-                      ''.join([f'{k}: {", ".join([f"{v_:.04f}" for v_ in v.avg_expanded])}, '
-                               for k, v in avg_meters.items() if v.count > 0]))
-                if not self.args.debug:
-                    self.writers['val'].add_scalar('global/loss', accuracy_list['losses'], epoch)
-                    self.writers['val'].add_scalars('accuracy', accuracy_list, epoch)
-
-            return accuracy_list if return_all_acc else accuracy_list['accuracy']
+        torch.save([a_total, b_total, c_total, labels_total, radius_total, idxs_total], '/proj/vondrick/didac/results/extracted_features_finegym.pth')
 
     def get_base_model(self):
         if 'DataParallel' in str(type(self.model)):  # both the ones from apex and from torch.nn

@@ -220,9 +220,14 @@ class Model(nn.Module):
             if self.target is None:
                 self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
-            loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
-                                                 self.sizes_mask, labels.shape[0])
-            return loss, results
+            # TODO go back to normal
+            # loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
+            #                                      self.sizes_mask, labels.shape[0])
+            # return loss, results
+
+            to_return = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
+                                            self.sizes_mask, labels.shape[0])
+            return to_return, input_linear.pow(2).sum(-1).sqrt().view(input_linear.shape[0]//6, 6)[:, -2]
 
     def _initialize_weights(self, module, gain=1.):
         for name, param in module.named_parameters():

@@ -467,7 +467,10 @@ class Hollywood2(data.Dataset):
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
         n = 1
         # image index starts from 1
-        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample + 1), n) 
+        if args.mode == 'train':
+            start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample + 1), n)
+        else:
+            start_idx = (vlen - self.num_seq * self.seq_len * self.downsample + 1) // 2
         seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
         seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
@@ -645,7 +648,7 @@ class FineGym(data.Dataset):
 
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
-        if self.mode == 'train' and False:  # TODO change
+        if self.mode == 'train':  # TODO change
             start = random.randint(0, len(segments) - self.num_seq)
         else:
             start = (len(segments) - self.num_seq) // 2

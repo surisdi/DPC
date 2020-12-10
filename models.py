@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from backbone.select_backbone import select_resnet
 from backbone.convrnn import ConvGRU
-from backbone.hyrnn_nets import MobiusGRU, MobiusLinear, MobiusDist2Hyperplane
+from backbone.hyrnn_nets import MobiusLinear, MobiusDist2Hyperplane
 import geoopt.manifolds.stereographic.math as gmath
 import losses
 

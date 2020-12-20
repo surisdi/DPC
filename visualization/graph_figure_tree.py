@@ -10,6 +10,9 @@ input_linear = torch.load('/Users/didac/proj/didac/results/input_linear.pth')
 labels = torch.load('/Users/didac/proj/didac/results/labels.pth')
 
 representations = input_linear.pow(2).sum(-1).sqrt().view(150, 6)[labels[:, 0, -1] != -1]
+
+# representations = torch.tensor([[[0.7, 0.7], [0.75, 0.75],  [0.8, 0.8],  [0.85, 0.85],  [0.87, 0.87],  [0.9, 0.9]]])
+
 means = representations.mean(0).cpu().numpy()
 error = representations.std(0).cpu().numpy()
 fig, ax = plt.subplots(dpi=400)

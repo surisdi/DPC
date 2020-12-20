@@ -90,7 +90,7 @@ class Model(nn.Module):
         self.relu = nn.ReLU(inplace=False)
         self._initialize_weights(self.agg)
 
-    def forward(self, block, labels=None):
+    def forward(self, block, labels=None, extract_features=False):
         a = time.time()
         # block: [B, N, C, SL, W, H]
         (B, N, C, SL, H, W) = block.shape
@@ -136,7 +136,6 @@ class Model(nn.Module):
         feature_predict_from = feature_dist  # To train linear layer on top of
         # And these are the features we have to "predict to" (in the self-supervised setting)
 
-        # TODO uncomment!
         feature_dist = feature_dist[:, N-self.args.pred_step::, :].contiguous()
         feature_dist = feature_dist.permute(0,1,3,4,2).reshape(B*self.args.pred_step*self.last_size**2,
                                                                2 if self.args.final_2dim else self.feature_dim)  # .transpose(0,1)
@@ -220,14 +219,15 @@ class Model(nn.Module):
             if self.target is None:
                 self.target, self.sizes_mask = losses.compute_mask(self.args, sizes_pred, labels.shape[0])
 
-            # TODO go back to normal
-            # loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
-            #                                      self.sizes_mask, labels.shape[0])
-            # return loss, results
+            if extract_features:
+                to_return = losses.compute_features(self.args, pred, labels, labels.shape[0])
+                return to_return, input_linear.pow(2).sum(-1).sqrt().view(input_linear.shape[0] // 6, 6)
 
-            to_return = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
-                                            self.sizes_mask, labels.shape[0])
-            return to_return, input_linear.pow(2).sum(-1).sqrt().view(input_linear.shape[0]//6, 6)[:, -2]
+            else:  # normal
+                loss, *results = losses.compute_loss(self.args, feature_dist, pred, labels, self.target, sizes_pred,
+                                                     self.sizes_mask, labels.shape[0])
+                return loss, results
+
 
     def _initialize_weights(self, module, gain=1.):
         for name, param in module.named_parameters():

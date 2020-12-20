@@ -12,12 +12,11 @@ from utils.poincare_distance import poincare_distance
 def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B, indices=None, trainer=None):
 
     if args.use_labels:
-        # results, loss = compute_supervised_loss(args, pred, labels, B)  # TODO go back to notrmal
-        to_return = compute_supervised_loss(args, pred, labels, B)
+        results, loss = compute_supervised_loss(args, pred, labels, B)
     else:
         results, loss = compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, sizes_mask, B, indices, trainer)
 
-    # to_return = [loss] + [torch.tensor(r).cuda() for r in results]   # TODO go back to notrmal
+    to_return = [loss] + [torch.tensor(r).cuda() for r in results]
     return to_return
 
 
@@ -67,35 +66,15 @@ def compute_supervised_loss(args, pred, labels, B):  #, top_down=False, separate
         else:  # Options 2
             labels = labels.to(args.device)
 
-        # pred = pred[labels[:, 0] != -1]
-        # labels = labels[labels[:, 0] != -1]
-        #
-        # gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
-        # indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
-        # gt[indices, labels] = 1
-        #
-        # loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
-        # accuracies = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float()
+        pred = pred[labels[:, 0] != -1]
+        labels = labels[labels[:, 0] != -1]
 
-        # TODO remove this
-        i = 0
-        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
-        a = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
-        i = 1
-        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
-        b = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
-        i = 2
-        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
-        c = torch.argmax(pred[:, init:end], dim=1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+        gt = torch.zeros(list(labels.shape[:-1]) + [pred.size(1)]).to(args.device)   # multi-label ground truth tensor
+        indices = torch.tensor(np.indices(labels.shape[:-1])).view(-1, 1).expand_as(labels)
+        gt[indices, labels] = 1
 
-
-
-        # a = a.view(labels.shape[0]//6, 6)[:, 3]
-        # b = b.view(labels.shape[0]//6, 6)[:, 3]
-        # labels = labels.view(labels.shape[0]//6, 6, 2)[:, 3]
-
-        return a, b, c, labels
-        #####
+        loss = (- gt * torch.nn.functional.log_softmax(pred, -1)).sum()/gt.sum()  # CE loss with logit as ground truth
+        accuracies = (torch.argmax(pred[:, :sh[args.dataset][1][0]], dim=1) == labels[:, 0]).float()
 
         hier_accuracies = []
         for top_down in [True, False]:
@@ -286,3 +265,40 @@ def bookkeeping(args, avg_meters, results):
             avg_meters['accuracy'].update(top1, B)
             
 
+def compute_features(args, pred, labels, B):
+    if args.pred_future:
+        assert (pred.shape[0] == B * args.num_seq) and (labels.shape[1] == args.num_seq)
+        labels = labels[:, -1]
+    pred = pred.view(B, args.num_seq, -1)
+
+    assert args.hierarchical_labels
+
+    if labels.shape[0] < pred.shape[0]:
+        if len(labels.shape) == 2:  # Option 4
+            assert pred.shape[0] % labels.shape[0] == 0
+            labels = labels.repeat_interleave(args.num_seq, dim=0).to(args.device)
+        else:  # labels should have 3 dimensions (batch, temporal, hierarchy). Option 6
+            labels = labels.view(-1, labels.shape[-1]).to(args.device)
+    else:  # Options 2
+        labels = labels.to(args.device)
+
+    percent = []
+    i = 0
+    init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+    a = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+    percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+    i = 1
+    init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+    b = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+    percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+
+    if len(sh[args.dataset][1]) == 3:
+        i = 2
+        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+        c = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+        percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+
+    else:
+        c = None
+
+    return a, b, c, labels, percent

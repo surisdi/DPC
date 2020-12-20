@@ -233,7 +233,7 @@ class Hollywood2(data.Dataset):
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
         n = 1
         # image index starts from 1
-        if args.mode == 'train':
+        if self.mode == 'train':
             start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample + 1), n)
         else:
             start_idx = (vlen - self.num_seq * self.seq_len * self.downsample + 1) // 2

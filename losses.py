@@ -224,6 +224,45 @@ def compute_scores(args, pred, feature_dist, sizes, B, indices=None, trainer=Non
     return score
 
 
+def compute_features(args, pred, labels, B):
+    if args.pred_future:
+        assert (pred.shape[0] == B * args.num_seq) and (labels.shape[1] == args.num_seq)
+        labels = labels[:, -1]
+    pred = pred.view(B, args.num_seq, -1)
+
+    assert args.hierarchical_labels
+
+    if labels.shape[0] < pred.shape[0]:
+        if len(labels.shape) == 2:  # Option 4
+            assert pred.shape[0] % labels.shape[0] == 0
+            labels = labels.repeat_interleave(args.num_seq, dim=0).to(args.device)
+        else:  # labels should have 3 dimensions (batch, temporal, hierarchy). Option 6
+            labels = labels.view(-1, labels.shape[-1]).to(args.device)
+    else:  # Options 2
+        labels = labels.to(args.device)
+
+    percent = []
+    i = 0
+    init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+    a = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+    percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+    i = 1
+    init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+    b = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+    percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+
+    if len(sh[args.dataset][1]) == 3:
+        i = 2
+        init, end = (int(np.array(sh[args.dataset][1][0:i]).sum()), np.array(sh[args.dataset][1][0:i + 1]).sum())
+        c = torch.argmax(pred[:, :, init:end], dim=-1) + int(np.array(sh[args.dataset][1][0:i]).sum())
+        percent.append(torch.nn.functional.softmax(pred[:, :, init:end], dim=-1).max(-1)[0])
+
+    else:
+        c = None
+
+    return a, b, c, labels, percent
+
+
 def compute_mask(args, sizes, B):
     if args.use_labels:
         return None, None  # No need to compute mask

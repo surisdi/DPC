@@ -17,7 +17,7 @@ import generate_tree_video
 
 def main():
     # Paths
-    dataset = 'finegym'  # 'finegym'
+    dataset = 'hollywood2'  # 'finegym'
     split = 'test'  # 'val', 'train'
     path_data = f'/proj/vondrick/didac/results/extracted_features_{dataset}_{split}.pth'
 
@@ -28,7 +28,7 @@ def main():
     folder_final_video = f'/proj/vondrick/shared/hypvideo/created_videos/{dataset}/{split}'
     os.makedirs(folder_final_video, exist_ok=True)
     max_videos = 5
-    for index in indexes_good[1:max_videos]:
+    for index in indexes_good[:max_videos]:
         event_name = a[5][index][:-12] if dataset == "finegym" else a[5][index].split('/')[-1]
         path_final_video = os.path.join(folder_final_video, f"{index}_{event_name}.mp4")
 
@@ -44,7 +44,7 @@ def create_video_index(index, a, dataset, path_final_video):
 
     pred_1 = a[0][index]
     pred_2 = a[1][index]
-    pred_3 = a[2][index]
+    pred_3 = a[2][index] if dataset == 'finegym' else None
     gt = a[3][index]
     radius = a[4][index]
     action_name = a[5][index]
@@ -124,6 +124,14 @@ def create_video_index(index, a, dataset, path_final_video):
 
     ############# BOTTOM PLOT #############
 
+    color_strokes = "#ffffff"
+    background_color = "#2f3337"
+    color_dot = "#fd9731"
+    color_line = "#ffffff"
+    color_threshold = "#ff5a53ff"
+    color_time = "#5cbfa8"
+    color_vertical = "#ffffff"
+
     path_input_plot = f'{provisional_folder}/plot_video_{dataset}.mp4'
 
     Writer = animation.writers['ffmpeg']
@@ -133,7 +141,9 @@ def create_video_index(index, a, dataset, path_final_video):
     fig.set_figheight(3)
     fig.set_figwidth(10)
     fig.set_tight_layout(True)
-
+    fig.set_facecolor(background_color)
+    matplotlib.rcParams['savefig.facecolor'] = background_color
+    fig.patch.set_alpha(1)
     # ax.get_xaxis().set_visible(False)
 
     ax.yaxis.grid(True, linestyle='--', linewidth=0.5)
@@ -158,6 +168,15 @@ def create_video_index(index, a, dataset, path_final_video):
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_visible(False)
 
+    ax.spines['bottom'].set_color(color_strokes)
+    ax.spines['top'].set_color(color_strokes)
+    ax.spines["right"].set_color(color_strokes)
+    ax.spines["left"].set_color(color_strokes)
+    ax.xaxis.label.set_color(color_strokes)
+    ax.yaxis.label.set_color(color_strokes)
+    ax.tick_params(axis='x', colors=color_strokes)
+    ax.tick_params(axis='y', colors=color_strokes)
+
     size_ball = 130
     points_all = [None] + list(radius.numpy())
 
@@ -169,6 +188,13 @@ def create_video_index(index, a, dataset, path_final_video):
         second = i/fps
         num_points = (np.array(times_end) < second).sum()
 
+        # if num_points == 0:
+        #     ylim_min = (a[4][index].min() - 0.02)*second/(times_end[0])
+        # else:
+        ylim_min = a[4][index].min() - 0.02
+        ylim_max = a[4][index].max() + 0.02
+
+
         # We would use this if we do not want to update the graph with time marker
         # global last_num_points
         # if num_points != last_num_points:
@@ -179,36 +205,53 @@ def create_video_index(index, a, dataset, path_final_video):
         ax.clear()
         ax.invert_yaxis()
         ax.set_xlim(-1, end_video-start_video + 1)
-        ax.set_facecolor('white')
 
-        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_facecolor(background_color)
+        plt.gcf().patch.set_facecolor(background_color)
+
+        xlabel = f'Time elapsed: {second:.02f}s' if dataset == 'hollywood2' else \
+            f'Time until action to predict: {np.max([times_end[-1]-second, 0]):.02f}s'
+        ax.set_xlabel(xlabel, fontsize=12)
         ax.set_ylabel('Poincare radius', fontsize=12)
         ax.set_xticks([])
 
         for p in percentiles:
-            ax.axhline(linewidth=3, color=(128 / 255., 0 / 255., 200 / 255., 0.9), y=p, linestyle=':', zorder=0)
+            ax.axhline(linewidth=3, color=color_threshold, y=p, linestyle=':', zorder=0)
 
         # Time marker
-        ax.plot((second, second), (ylim_min, ylim_max), linestyle='-', color='b', alpha=0.6, zorder=0)
+        ax.plot((second, second), (ylim_min, ylim_max), linestyle='-', color=color_time, alpha=1, zorder=0,
+                linewidth=3.0)
+        ax.scatter(second, ylim_min, marker="v", color=color_time, s=60)
+        ax.scatter(second, ylim_min-(ylim_max-ylim_min)/30, marker="_", color=color_time, s=75)
 
         point_old = None
         for j, point in enumerate(points):
-            if point is None:
-                continue
-            ax.plot((times_end[j-1], times_end[j-1]), (ylim_min, ylim_max), linestyle='--', color='k', alpha=0.3, zorder=0)
-            ax.scatter([times_end[j-1]], [point], color='#ff57f0ff', s=size_ball)
             # This was to create the line only when the new point is already there
             # if point_old is not None:
             #     plt.arrow(times_end[j-2], point_old, times_end[j-1]-times_end[j-2], point - point_old, head_width=0,
             #               head_length=0, zorder=0, color='k')
 
-            if j < len(points_all)-1:
+            if j==0:
+                final_time = np.min([second, times_end[0]])
+                point_zero = 0
+                # plt.arrow(0, point_zero, final_time,
+                #           (points_all[j+1] - point_zero)*(final_time)/(times_end[j]),
+                #           head_width=0, head_length=0, zorder=0, color=color_line)
+            elif j < len(points_all)-1:
                 final_time = np.min([second, times_end[j]])
                 plt.arrow(times_end[j - 1], point, final_time - times_end[j - 1],
                           (points_all[j+1] - point)*(final_time-times_end[j-1])/(times_end[j]-times_end[j - 1]),
-                          head_width=0, head_length=0, zorder=0, color='k')
+                          head_width=0, head_length=0, zorder=0, color=color_line)
+
+            if point is None:
+                continue
+            ax.plot((times_end[j-1], times_end[j-1]), (ylim_min, ylim_max), linestyle='--', color=color_vertical, alpha=0.5, zorder=0)
+            ax.scatter([times_end[j-1]], [point], color=color_dot, s=size_ball)
 
             point_old = point
+
+        if len(points) == 1:
+            plt.text(0, ylim_max, "Predicting" + "." * ((i // 5) % 4), color=color_strokes, size=16)
 
     ani = matplotlib.animation.FuncAnimation(fig, animate_plot, frames=int(fps*(end_video-start_video)),
                                              repeat=True)
@@ -234,10 +277,13 @@ def create_video_index(index, a, dataset, path_final_video):
 
     last_num_points = -1
     last_saved_image = None
+    num_dots_path = {}
+
     for i in range(num_frames):
         second = i/fps
         num_points = (np.array(times_end) < second).sum()
-        if num_points > last_num_points:  # There is a new prediction
+        num_dots =  (i//5)%4
+        if num_points > last_num_points or num_dots not in num_dots_path:  # There is a new prediction
             last_num_points = num_points
             if dataset == 'hollywood2':
                 gt_tree = list(gt.numpy())
@@ -264,11 +310,18 @@ def create_video_index(index, a, dataset, path_final_video):
 
             percentage_pred = percentage[::-1][selected_level-1][num_points-1].item() if selected_level is not None \
                 else None
-            tree_video = generate_tree_video.create_figure(dataset, selected_level, gt_tree, pred_tree, percentage_pred)
+            num_dots = 3
+            if num_points == 0:
+                num_dots = (i // 5) % 4
+                num_dots_path[num_dots] = os.path.join(path_pngs, f'tree_video_{i:05d}.png')
+            tree_video = generate_tree_video.create_figure(dataset, selected_level, gt_tree, pred_tree, percentage_pred,
+                                                           num_dots)
             tree_video.save_image(os.path.join(path_pngs, f'tree_video_{i:05d}.png'))
             last_saved_image = os.path.join(path_pngs, f'tree_video_{i:05d}.png')
         else:
             # Create symlink
+            if num_points == 0:
+                last_saved_image = os.path.join(path_pngs, num_dots_path[num_dots])
             assert last_saved_image is not None
             os.symlink(src=last_saved_image, dst=os.path.join(path_pngs, f'tree_video_{i:05d}.png'))
 
@@ -301,10 +354,11 @@ def create_video_index(index, a, dataset, path_final_video):
     #                  "[top]crop=trunc(iw/2)*2:trunc(ih/2)*2[top];" \
     #                  "[top][bottom]vstack[vid]"
 
-    filter_complex = "[0:v]pad=h=ih+5:color=black[v0];" \
+    filter_complex = "[0:v]pad=h=ih+5:color=white[v0];" \
                      "[1:v][v0]scale2ref=iw:'ow/mdar'[v1][v0];" \
                      "[v0][v1]vstack[left];" \
-                     "[left]pad=w=iw+5:color=black[left];" \
+                     "[left]crop=trunc(iw/2)*2:trunc(ih/2)*2[left];" \
+                     "[left]pad=w=iw+5:color=white[left];" \
                      "[2:v]crop=trunc(iw/2)*2:trunc(ih/2)*2[right];" \
                      "[left][right]scale2ref='oh*mdar':ih[left][right];" \
                      "[left]crop=trunc(iw/2)*2:trunc(ih/2)*2[left];" \

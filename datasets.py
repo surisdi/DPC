@@ -1,19 +1,20 @@
-import torch
-from torch.utils import data
-import os
-import time
-import pandas as pd
-import numpy as np
-from utils.augmentation import Image
-from collections import defaultdict
 import json
+import os
 import random
-import torchvision
-from torchvision import datasets, transforms
-from tqdm import tqdm
-from utils import augmentation
 import re
+from collections import defaultdict
 
+import numpy as np
+import pandas as pd
+import torch
+import torchvision
+from sklearn.model_selection import train_test_split
+from torch.utils import data
+from torchvision import transforms
+from tqdm import tqdm
+
+from utils import augmentation
+from utils.augmentation import Image
 
 sizes_hierarchy = {
     'finegym': (307, [288, 15, 4]),
@@ -39,33 +40,33 @@ class Kinetics600(data.Dataset):
                  num_seq=5,
                  downsample=3,
                  epsilon=5,
-                 unit_test=False,
                  return_label=False,
                  return_idx=False,
-                 path_dataset=''):
+                 path_dataset='',
+                 path_data_info=''):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
         self.num_seq = num_seq
         self.downsample = downsample
         self.epsilon = epsilon
-        self.unit_test = unit_test
         self.return_label = return_label
         self.return_idx = return_idx
 
         self.path_dataset = path_dataset
+        self.path_data_info = path_data_info
 
         # splits
         if mode == 'train':
-            split = '/proj/vondrick/didac/code/DPC/process_data/data/kinetics600/train_split.csv'
+            split = os.path.join(self.path_data_info, 'kinetics600/train_split.csv')
             video_info = pd.read_csv(split, header=None)
         elif (mode == 'val') or (mode == 'test'):
-            split = '/proj/vondrick/didac/code/DPC/process_data/data/kinetics600/train_split.csv'
+            split = os.path.join(self.path_data_info, 'kinetics600/train_split.csv')
             video_info = pd.read_csv(split, header=None)
         else:
             raise ValueError('wrong mode')
 
-        path_drop_idx = f'/proj/vondrick/didac/code/DPC/process_data/data/drop_idx_kinetics_{mode}.pth'
+        path_drop_idx = os.path.join(self.path_data_info, f'drop_idx_kinetics_{mode}.pth')
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:
@@ -81,7 +82,7 @@ class Kinetics600(data.Dataset):
 
         if mode == 'val':
             self.video_info = self.video_info.sample(frac=0.3, random_state=666)
-        if mode == 'test' and True:  #self.unit_test:
+        if mode == 'test':
             self.video_info = self.video_info.sample(1000, random_state=666)
         # shuffle not necessary because use RandomSampler
 
@@ -94,32 +95,12 @@ class Kinetics600(data.Dataset):
         seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
         return [seq_idx_block, vpath]
 
-    def get_info(self, index):
+    def __getitem__(self, index):
         vpath, vlen = self.video_info.iloc[index]
-        if self.path_dataset != '':
-            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
         items = self.idx_sampler(vlen, vpath)
         while items is None or items[0] is None:
             index = random.randint(0, len(self.video_info) - 1)
             vpath, vlen = self.video_info.iloc[index]
-            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
-            # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
-            items = self.idx_sampler(vlen, vpath)
-
-        idx_block, vpath = items
-
-        return idx_block, vpath
-
-    def __getitem__(self, index):
-        vpath, vlen = self.video_info.iloc[index]
-        if self.path_dataset != '':
-            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
-        items = self.idx_sampler(vlen, vpath)
-        while items is None or items[0] is None:
-            index = random.randint(0, len(self.video_info)-1)
-            vpath, vlen = self.video_info.iloc[index]
-            vpath = vpath.replace('/proj/vondrick/datasets/kinetics-600/data', self.path_dataset)
-            # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
             items = self.idx_sampler(vlen, vpath)
 
         idx_block, vpath = items
@@ -144,6 +125,7 @@ class Hollywood2(data.Dataset):
     Number of classes: 12
     Number of classes including parents: 17 (12 + 5)
     """
+
     def __init__(self,
                  mode='train',
                  transform=None,
@@ -151,29 +133,31 @@ class Hollywood2(data.Dataset):
                  num_seq=5,
                  downsample=3,
                  epsilon=5,
-                 unit_test=False,
                  return_label=False,
-                 hierarchical_label=False):
+                 hierarchical_label=False,
+                 path_dataset='',
+                 path_data_info=''):
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
         self.num_seq = num_seq
         self.downsample = downsample
         self.epsilon = epsilon
-        self.unit_test = unit_test
         self.return_label = return_label
         self.hierarchical_label = hierarchical_label
+        self.path_dataset = path_dataset
+        self.path_data_info = path_data_info
 
-        if mode == 'train':
-            split = '/proj/vondrick/datasets/Hollywood2/processed_data/train_split.csv'
+        if mode in ['train', 'val']:
+            split = os.path.join(self.path_data_info, 'hollywood2/train_split.csv')
             video_info = pd.read_csv(split, header=None)
-        elif (mode == 'val') or (mode == 'test'):
-            split = '/proj/vondrick/datasets/Hollywood2/processed_data/test_split.csv'
+        elif mode == 'test':
+            split = os.path.join(self.path_data_info, 'hollywood2/test_split.csv')
             video_info = pd.read_csv(split, header=None)
         else:
             raise ValueError('wrong mode')
 
-        path_drop_idx = f'/proj/vondrick/datasets/Hollywood2/processed_data/drop_idx_hollywood_{mode}.pth'
+        path_drop_idx = os.path.join(self.path_data_info, f'hollywood2/drop_idx_hollywood_{mode}.pth')
         if os.path.isfile(path_drop_idx):
             drop_idx = torch.load(path_drop_idx)
         else:
@@ -187,24 +171,25 @@ class Hollywood2(data.Dataset):
 
         self.video_info = video_info.drop(drop_idx, axis=0)
 
-        if mode == 'val': self.video_info = self.video_info.sample(frac=0.3, random_state=666)
-        if self.unit_test: self.video_info = self.video_info.sample(32, random_state=666)
+        if mode in ['train', 'val']:
+            train_info, val_info = train_test_split(self.video_info, test_size=0.1, random_state=666)
+            self.video_info = train_info if mode == "train" else val_info
         # shuffle not necessary because use RandomSampler
 
         # Read action and index
         self.dict_labels = {}
         self.dict_labels_hier = {}
-        label_path = '/proj/vondrick/datasets/Hollywood2/class_Ind'
+        label_path = os.path.join(self.path_dataset, 'hollywood2/class_Ind')
         with open(os.path.join(label_path, 'class_Ind.txt'), 'r') as f:
             for line in f:
                 action, label = line.split()
                 self.dict_labels[action] = label
-                
+
         with open(os.path.join(label_path, 'class_Ind_Hier.txt'), 'r') as f:
             for line in f:
                 action, label, _ = line.split()
                 self.dict_labels_hier[action] = label
-        
+
         self.child_nodes = defaultdict(list)
         self.parent_nodes = defaultdict(list)
         with open(os.path.join(label_path, 'class_Relation.txt'), 'r') as f:
@@ -212,7 +197,7 @@ class Hollywood2(data.Dataset):
                 parent, child = line.split()
                 self.child_nodes[parent].append(child)
                 self.parent_nodes[child].append(parent)
-                
+
         self.hierarchy = defaultdict(list)
         with open(os.path.join(label_path, 'class_Ind_Hier.txt'), 'r') as f:
             for line in f:
@@ -220,7 +205,7 @@ class Hollywood2(data.Dataset):
                 self.hierarchy[level].append(action)
         # Get labels
         self.labels = {}
-        with open('/proj/vondrick/datasets/Hollywood2/hollywood2_videos.txt', 'r') as f:
+        with open(os.path.join(self.path_data_info, 'hollywood2/hollywood2_videos.txt'), 'r') as f:
             for line in f:
                 key, label, *_ = line.split()
                 if '-' in label:  # scene, not action
@@ -246,7 +231,6 @@ class Hollywood2(data.Dataset):
         action = self.labels[vpath.split('/')[-1]]
         label = torch.LongTensor([int(self.dict_labels[action])])
 
-        # vpath = vpath.replace('/proj/vondrick/datasets/', '/local/vondrick/didacsuris/local_data/')
         items = self.idx_sampler(vlen, vpath)
         if items is None: print(vpath)
 
@@ -284,32 +268,33 @@ class FineGym(data.Dataset):
     - 4 in the action level
     - 307 in the hierarchical level (288 + 15 + 4)
     """
+
     def __init__(self,
                  mode='train',
-                 path_dataset='/proj/vondrick/datasets/FineGym/',
+                 path_dataset='',
                  transform=None,
                  seq_len=10,  # given duration distribution, we should aim for ~1.5 seconds (around 7-8 frames at 5 fps)
                  num_seq=5,
                  epsilon=5,
-                 unit_test=False,
                  return_label=False,
                  gym288=True,
                  fps=5,
                  hierarchical_label=False,
                  action_level_gt=False,
-                 return_idx=False):
+                 return_idx=False,
+                 path_data_info=''):
         self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
         self.seq_len = seq_len
         self.num_seq = num_seq
         self.epsilon = epsilon
-        self.unit_test = unit_test
         self.return_label = return_label
         self.fps = fps
         self.hierarchical_label = hierarchical_label,
         self.action_level_gt = action_level_gt
         self.return_idx = return_idx
+        self.path_data_info = path_data_info
 
         if mode in ['train', 'val']:
             path_labels = 'gym288_train_element_v1.1.txt' if gym288 else 'gym99_train_element_v1.1.txt'
@@ -319,13 +304,13 @@ class FineGym(data.Dataset):
             raise ValueError('wrong mode')
         path_labels = 'annotations/' + path_labels
 
-        with open(os.path.join(path_dataset, 'annotations/finegym_annotation_info_v1.1.json'), 'r') as f:
+        with open(os.path.join(self.path_data_info, 'finegym/annotations/finegym_annotation_info_v1.1.json'), 'r') as f:
             self.annotations = json.load(f)
 
         # Prepare superclasses
         # First, load information about the available superclasses
         self.parent_classes = {}
-        with open(os.path.join(path_dataset, 'categories/set_categories.txt'), 'r') as f:
+        with open(os.path.join(self.path_data_info, 'finegym/categories/set_categories.txt'), 'r') as f:
             class_number = 288 if gym288 else 99
             set_grand_classes = set()
             for line in f:
@@ -335,11 +320,11 @@ class FineGym(data.Dataset):
                 self.parent_classes[idx_class] = (class_number, name_class, grand_class)
                 set_grand_classes.add(grand_class)
                 class_number += 1
-        self.grand_classes = {name: class_number+i for i, name in enumerate(sorted(set_grand_classes))}
+        self.grand_classes = {name: class_number + i for i, name in enumerate(sorted(set_grand_classes))}
 
         self.super_classes = {}
         path_categories = 'gym288_categories.txt' if gym288 else 'gym99_categories.txt'
-        with open(os.path.join(path_dataset, 'categories', path_categories), 'r') as f:
+        with open(os.path.join(self.path_data_info, 'finegym/categories', path_categories), 'r') as f:
             for line in f:
                 line_split = re.split(': |; ', re.sub(' +', ' ', line))
                 subclass = int(line_split[1])
@@ -355,7 +340,7 @@ class FineGym(data.Dataset):
 
         self.subclipidx2label = {}
         clips_in_labels = set()  # Some clips in "clips" may belong to another split or not even be in the *element.txt
-        with open(os.path.join(path_dataset, path_labels), 'r') as f:
+        with open(os.path.join(self.path_data_info, 'finegym', path_labels), 'r') as f:
             for line in f:
                 data_split = line.replace('\n', '').split()
                 subclip_name = data_split[0]
@@ -373,19 +358,6 @@ class FineGym(data.Dataset):
             video_id = clip[:11]
             event_id = clip[12:]
             segments = self.annotations[video_id][event_id]['segments']
-
-            # # ######### TODO remove this. Only for figure
-            # video_name = 'rrrgsW--AE8'
-            # grand_class = 3
-            # if segments is None or len(segments) == 0:
-            #     continue
-            # action_id = clip + '_' + list(segments.keys())[0]
-            # if action_id not in self.subclipidx2label:
-            #     continue
-            # if not (int(self.super_classes[self.subclipidx2label[action_id]][1]) == grand_class) \
-            #         or not clip.startswith(video_name):
-            #     continue
-            # ####################
 
             if segments is not None and (
                     # This is filtering out several short videos, approx 1/3 of the remaining videos for self.num_seq=6
@@ -406,15 +378,9 @@ class FineGym(data.Dataset):
 
         self.idx2clipidx = {i: clipidx for i, clipidx in enumerate(self.clips.keys())}
 
-    def get_info(self, index):
-        clipidx = self.idx2clipidx[index]
-        segments = self.clips[clipidx]
-
-        return clipidx, segments, index
-
     def read_video(self, clipidx, segments):
         # Sample self.num_seq consecutive actions from this segment
-        if self.mode == 'train':  # TODO change
+        if self.mode == 'train':
             start = random.randint(0, len(segments) - self.num_seq)
         else:
             start = (len(segments) - self.num_seq) // 2
@@ -425,8 +391,6 @@ class FineGym(data.Dataset):
             subclipidx = clipidx + '_' + actions[i]
             subfolder = 'action_videos' if len(actions[i]) == 11 else 'stage_videos'
             path_clip = os.path.join(self.path_dataset, subfolder, f'{subclipidx}.mp4')
-            if self.path_dataset != '':
-                path_clip = path_clip.replace('/proj/vondrick/datasets/FineGym', self.path_dataset)
             if os.path.isfile(path_clip):
                 video, audio, info = torchvision.io.read_video(path_clip, start_pts=0, end_pts=None, pts_unit='sec')
                 video = video.float()
@@ -456,7 +420,7 @@ class FineGym(data.Dataset):
                 # This happens when the specific case when the action is not part of the action classes (for example
                 # when it is very specific and we are working with gym99). In this case we still load the action because
                 # if we skip it the temporal prediction does not make sense.
-                labels.append(-1 if not self.hierarchical_label else torch.tensor([-1]*3))
+                labels.append(-1 if not self.hierarchical_label else torch.tensor([-1] * 3))
             else:
                 if self.hierarchical_label or self.action_level_gt:
                     label_specific = self.subclipidx2label[subclipidx]
@@ -495,15 +459,14 @@ class FineGym(data.Dataset):
 
 
 class MovieNet(data.Dataset):
-    def __init__(self, mode='train', transform=None, num_seq=5, path_dataset=''):
-        if path_dataset == '':
-            path_dataset = '/proj/vondrick/datasets/MovieNet'
+    def __init__(self, mode='train', transform=None, num_seq=5, path_dataset='', path_data_info=''):
         self.path_dataset = path_dataset
         self.mode = mode
         self.transform = transform
         self.num_seq = num_seq
+        self.path_data_info = path_data_info
 
-        path_save = f'/proj/vondrick/shared/DPC/data_info/movienet_{mode}.pth'
+        path_save = os.path.join(self.path_data_info, f'movienet_{mode}.pth')
 
         if os.path.isfile(path_save):
             self.clips, self.subclip_seqs = torch.load(path_save)
@@ -519,14 +482,15 @@ class MovieNet(data.Dataset):
             randomized_indices = list(range(len(self.clips)))
             random.Random(500).shuffle(randomized_indices)
             low, high = {'train': [0, 0.8], 'val': [0.8, 0.9], 'test': [0.9, 1]}[self.mode]
-            labels_mode = randomized_indices[int(low*len(self.clips)):int(high*len(self.clips))]
+            labels_mode = randomized_indices[int(low * len(self.clips)):int(high * len(self.clips))]
             self.clips = {k: v for i, (k, v) in enumerate(self.clips.items()) if i in labels_mode}
 
             # split clips into subclip sequences of num_seq elements
             self.subclip_seqs = []
             for k, v in self.clips.items():
                 all_clips = np.sort(list(v.keys()))
-                all_clips = all_clips[:num_seq*(len(all_clips)//num_seq)].reshape(len(all_clips)//num_seq, num_seq)
+                all_clips = all_clips[:num_seq * (len(all_clips) // num_seq)].reshape(len(all_clips) // num_seq,
+                                                                                      num_seq)
                 for i in range(all_clips.shape[0]):
                     self.subclip_seqs.append((all_clips[i], k, i))
 
@@ -558,35 +522,22 @@ class MovieNet(data.Dataset):
         return len(self.subclip_seqs)
 
 
-def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False,\
-             num_workers=0, path_dataset=''):
-
+def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, \
+             num_workers=0, path_dataset='', path_data_info=''):
     if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
         raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
     if return_label and not action_level_gt and args.dataset != 'finegym':
         raise Exception('subaction only subactions available in finegym dataset')
 
     if mode == 'train':
-        if args.dataset == 'ucf101':  # designed for ucf101, short size=256, rand crop to 224x224 then scale to 128x128
-            transform = transforms.Compose([
-                augmentation.RandomHorizontalFlip(consistent=True),
-                augmentation.RandomCrop(size=224, consistent=True),
-                augmentation.Scale(size=(args.img_dim, args.img_dim)),
-                augmentation.RandomGray(consistent=False, p=0.5),
-                augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
-                augmentation.ToTensor(),
-                augmentation.Normalize()
-            ])
-        # designed for kinetics400, short size=150, rand crop to 128x128
-        else:
-            transform = transforms.Compose([
-                augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
-                augmentation.RandomHorizontalFlip(consistent=True),
-                augmentation.RandomGray(consistent=False, p=0.5),
-                augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
-                augmentation.ToTensor(),
-                augmentation.Normalize()
-            ])
+        transform = transforms.Compose([
+            augmentation.RandomSizedCrop(size=args.img_dim, consistent=True, p=1.0),
+            augmentation.RandomHorizontalFlip(consistent=True),
+            augmentation.RandomGray(consistent=False, p=0.5),
+            augmentation.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=1.0),
+            augmentation.ToTensor(),
+            augmentation.Normalize()
+        ])
     else:
         transform = transforms.Compose([
             augmentation.CenterCrop(size=args.img_dim, consistent=True),
@@ -594,22 +545,16 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
             augmentation.Normalize()
         ])
 
-    if args.dataset == 'k600':
+    if args.dataset == 'kinetics':
         dataset = Kinetics600(mode=mode,
-                                      transform=transform,
-                                      seq_len=args.seq_len,
-                                      num_seq=args.num_seq,
-                                      downsample=5,
-                                      return_label=return_label,
-                                      return_idx=args.viz,
-                                      path_dataset=path_dataset)
-    elif args.dataset == 'ucf101':
-        dataset = UCF101_3d(mode=mode,
-                            transform=transform,
-                            seq_len=args.seq_len,
-                            num_seq=args.num_seq,
-                            downsample=args.ds,
-                            return_label=return_label)
+                              transform=transform,
+                              seq_len=args.seq_len,
+                              num_seq=args.num_seq,
+                              downsample=5,
+                              return_label=return_label,
+                              return_idx=False,
+                              path_dataset=path_dataset,
+                              path_data_info=path_data_info)
     elif args.dataset == 'hollywood2':
         if return_label:
             assert action_level_gt, 'hollywood2 does not have subaction labels'
@@ -619,7 +564,9 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                              num_seq=args.num_seq,
                              downsample=args.ds,
                              return_label=return_label,
-                             hierarchical_label=hierarchical_label)
+                             hierarchical_label=hierarchical_label,
+                             path_dataset=path_dataset,
+                             path_data_info=path_data_info)
     elif args.dataset == 'finegym':
         if hierarchical_label:
             assert not action_level_gt, 'finegym does not have hierarchical information at the action level'
@@ -627,20 +574,22 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
                           transform=transform,
                           seq_len=args.seq_len,
                           num_seq=args.num_seq,
-                          fps=int(25/args.ds),  # approx
+                          fps=int(25 / args.ds),  # approx
                           return_label=return_label,
                           hierarchical_label=hierarchical_label,
                           action_level_gt=action_level_gt,
                           path_dataset=path_dataset,
-                          return_idx=args.viz)
+                          return_idx=False,
+                          path_data_info=path_data_info)
     elif args.dataset == 'movienet':
         assert not return_label, 'Not yet implemented (actions not available online)'
         assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
-        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq, path_dataset=path_dataset)
+        dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq, path_dataset=path_dataset,
+                           path_data_info=path_data_info)
     else:
         raise ValueError('dataset not supported')
 
-    sampler = data.RandomSampler(dataset) if mode == 'train' or args.viz else data.SequentialSampler(dataset)
+    sampler = data.RandomSampler(dataset) if mode == 'train' else data.SequentialSampler(dataset)
 
     data_loader = data.DataLoader(dataset,
                                   batch_size=args.batch_size,

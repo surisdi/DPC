@@ -1,16 +1,16 @@
-import random
-import numbers
-import math
 import collections
+import math
+import numbers
+import random
+
 import numpy as np
+import torch
+import torchvision
+import torchvision.transforms.functional as F
 from PIL import ImageOps, Image
-from joblib import Parallel, delayed
+from torchvision import transforms
 from torchvision.transforms import _transforms_video as transforms_video
 
-import torchvision
-from torchvision import transforms
-import torchvision.transforms.functional as F
-import torch
 
 class Padding:
     def __init__(self, pad):
@@ -20,6 +20,7 @@ class Padding:
         if type(img) == torch.Tensor:
             raise NotImplemented
         return ImageOps.expand(img, border=self.pad, fill=0)
+
 
 class Scale:
     def __init__(self, size, interpolation=Image.NEAREST):
@@ -123,6 +124,7 @@ class RandomCropWithProb:
         else:
             return imgmap
 
+
 class RandomCrop:
     def __init__(self, size, consistent=True):
         if isinstance(size, numbers.Number):
@@ -160,10 +162,10 @@ class RandomCrop:
                 result = []
                 for idx, i in enumerate(imgmap):
                     proposal = []
-                    for j in range(3): # number of proposal: use the one with largest optical flow
+                    for j in range(3):  # number of proposal: use the one with largest optical flow
                         x = random.randint(0, w - tw)
                         y = random.randint(0, h - th)
-                        proposal.append([x, y, abs(np.mean(flowmap[idx,y:y+th,x:x+tw,:]))])
+                        proposal.append([x, y, abs(np.mean(flowmap[idx, y:y + th, x:x + tw, :]))])
                     [x1, y1, _] = max(proposal, key=lambda x: x[-1])
                     result.append(i.crop((x1, y1, x1 + tw, y1 + th)))
                 return result
@@ -187,7 +189,7 @@ class RandomSizedCrop:
             assert self.consistent, "For Torch tensors the option of not making it consistent is not implemented"
             return self.operation_torch(imgmap)
         img1 = imgmap[0]
-        if random.random() < self.threshold: # do RandomSizedCrop
+        if random.random() < self.threshold:  # do RandomSizedCrop
             for attempt in range(10):
                 area = img1.size[0] * img1.size[1]
                 target_area = random.uniform(0.5, 1) * area
@@ -204,7 +206,7 @@ class RandomSizedCrop:
                         y1 = random.randint(0, img1.size[1] - h)
 
                         imgmap = [i.crop((x1, y1, x1 + w, y1 + h)) for i in imgmap]
-                        for i in imgmap: assert(i.size == (w, h))
+                        for i in imgmap: assert (i.size == (w, h))
 
                         return [i.resize((self.size, self.size), self.interpolation) for i in imgmap]
                 else:
@@ -216,18 +218,18 @@ class RandomSizedCrop:
                             x1 = random.randint(0, img1.size[0] - w)
                             y1 = random.randint(0, img1.size[1] - h)
                             result.append(i.crop((x1, y1, x1 + w, y1 + h)))
-                            assert(result[-1].size == (w, h))
+                            assert (result[-1].size == (w, h))
                         else:
                             result.append(i)
 
                     assert len(result) == len(imgmap)
-                    return [i.resize((self.size, self.size), self.interpolation) for i in result] 
+                    return [i.resize((self.size, self.size), self.interpolation) for i in result]
 
-            # Fallback
+                    # Fallback
             scale = Scale(self.size, interpolation=self.interpolation)
             crop = CenterCrop(self.size)
             return crop(scale(imgmap))
-        else: # don't do RandomSizedCrop, do CenterCrop
+        else:  # don't do RandomSizedCrop, do CenterCrop
             crop = CenterCrop(self.size)
             return crop(imgmap)
 
@@ -258,13 +260,14 @@ class RandomHorizontalFlip:
                 if random.random() < self.threshold:
                     result.append(i.transpose(Image.FLIP_LEFT_RIGHT))
                 else:
-                    result.append(i) 
+                    result.append(i)
             assert len(result) == len(imgmap)
-            return result 
+            return result
 
 
 class RandomGray:
     '''Actually it is a channel splitting, not strictly grayscale images'''
+
     def __init__(self, consistent=True, p=0.5):
         self.consistent = consistent
         self.p = p  # probability to apply grayscale
@@ -292,13 +295,13 @@ class RandomGray:
                 if random.random() < self.p:
                     result.append(self.grayscale(i))
                 else:
-                    result.append(i) 
+                    result.append(i)
             assert len(result) == len(imgmap)
-            return result 
+            return result
 
     def grayscale(self, img):
         channel = np.random.choice(3)
-        np_img = np.array(img)[:,:,channel]
+        np_img = np.array(img)[:, :, channel]
         np_img = np.dstack([np_img, np_img, np_img])
         img = Image.fromarray(np_img, 'RGB')
         return img
@@ -308,6 +311,7 @@ class RandomGray:
         img = img[channel]
         img = img.unsqueeze(0).expand((3, img.shape[0], img.shape[1], img.shape[2]))
         return img
+
 
 class ColorJitter(object):
     """Randomly change the brightness, contrast and saturation of an image. --modified from pytorch source code
@@ -325,6 +329,7 @@ class ColorJitter(object):
             hue_factor is chosen uniformly from [-hue, hue] or the given [min, max].
             Should have 0<= hue <= 0.5 or -0.5 <= min <= max <= 0.5.
     """
+
     def __init__(self, brightness=0, contrast=0, saturation=0, hue=0, consistent=False, p=1.0):
         self.brightness = self._check_input(brightness, 'brightness')
         self.contrast = self._check_input(contrast, 'contrast')
@@ -332,7 +337,7 @@ class ColorJitter(object):
         self.hue = self._check_input(hue, 'hue', center=0, bound=(-0.5, 0.5),
                                      clip_first_on_zero=False)
         self.consistent = consistent
-        self.threshold = p 
+        self.threshold = p
 
     def _check_input(self, value, name, center=1, bound=(0, float('inf')), clip_first_on_zero=True):
         if isinstance(value, numbers.Number):
@@ -388,7 +393,7 @@ class ColorJitter(object):
         if type(imgmap) == torch.Tensor:
             return imgmap  # TODO?
             # raise NotImplemented
-        if random.random() < self.threshold: # do ColorJitter
+        if random.random() < self.threshold:  # do ColorJitter
             if self.consistent:
                 transform = self.get_params(self.brightness, self.contrast,
                                             self.saturation, self.hue)
@@ -400,8 +405,8 @@ class ColorJitter(object):
                                                 self.saturation, self.hue)
                     result.append(transform(img))
                 return result
-        else: # don't do ColorJitter, do nothing
-            return imgmap 
+        else:  # don't do ColorJitter, do nothing
+            return imgmap
 
     def __repr__(self):
         format_string = self.__class__.__name__ + '('
@@ -411,22 +416,25 @@ class ColorJitter(object):
         format_string += ', hue={0})'.format(self.hue)
         return format_string
 
+
 class RandomRotation:
     def __init__(self, consistent=True, degree=15, p=1.0):
         self.consistent = consistent
-        self.degree = degree 
+        self.degree = degree
         self.threshold = p
+
     def __call__(self, imgmap):
         if type(imgmap) == torch.Tensor:
             raise NotImplemented
-        if random.random() < self.threshold: # do RandomRotation
+        if random.random() < self.threshold:  # do RandomRotation
             if self.consistent:
                 deg = np.random.randint(-self.degree, self.degree, 1)[0]
                 return [i.rotate(deg, expand=True) for i in imgmap]
             else:
                 return [i.rotate(np.random.randint(-self.degree, self.degree, 1)[0], expand=True) for i in imgmap]
-        else: # don't do RandomRotation, do nothing
-            return imgmap 
+        else:  # don't do RandomRotation, do nothing
+            return imgmap
+
 
 class ToTensor:
     def __call__(self, imgmap):
@@ -434,6 +442,7 @@ class ToTensor:
             return imgmap
         totensor = transforms.ToTensor()
         return [totensor(i) for i in imgmap]
+
 
 class Normalize:
     def __init__(self, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
@@ -446,5 +455,3 @@ class Normalize:
             return self.operation_torch(imgmap)
         normalize = transforms.Normalize(mean=self.mean, std=self.std)
         return [normalize(i) for i in imgmap]
-
-

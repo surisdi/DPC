@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 
 def poincare_distance(pred, gt):
@@ -21,7 +21,7 @@ def square_norm(x):
     Helper function returning square of the euclidean norm.
     Also here we clamp it since it really likes to die to zero.
     """
-    norm = torch.norm(x,dim=-1,p=2)**2
+    norm = torch.norm(x, dim=-1, p=2) ** 2
     return torch.clamp(norm, min=1e-5)
 
 
@@ -33,14 +33,14 @@ def pairwise_distances(x, y=None):
             if y is not given then use 'y=x'.
     i.e. dist[i,j] = ||x[i,:]-y[j,:]||^2
     '''
-    x_norm = (x**2).sum(1).view(-1, 1)
+    x_norm = (x ** 2).sum(1).view(-1, 1)
     if y is not None:
         y_t = torch.transpose(y, 0, 1)
-        y_norm = (y**2).sum(1).view(1, -1)
+        y_norm = (y ** 2).sum(1).view(1, -1)
     else:
         y_t = torch.transpose(x, 0, 1)
         y_norm = x_norm.view(1, -1)
-    
+
     dist = x_norm + y_norm - 2.0 * torch.mm(x, y_t)
     # Ensure diagonal is zero if x=y
     # if y is None:

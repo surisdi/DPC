@@ -4,6 +4,7 @@ import torch.nn as nn
 
 class ConvGRUCell(nn.Module):
     ''' Initialize ConvGRU cell '''
+
     def __init__(self, input_size, hidden_size, kernel_size):
         super(ConvGRUCell, self).__init__()
         self.input_size = input_size
@@ -11,9 +12,9 @@ class ConvGRUCell(nn.Module):
         self.kernel_size = kernel_size
         padding = kernel_size // 2
 
-        self.reset_gate = nn.Conv2d(input_size+hidden_size, hidden_size, kernel_size, padding=padding)
-        self.update_gate = nn.Conv2d(input_size+hidden_size, hidden_size, kernel_size, padding=padding)
-        self.out_gate = nn.Conv2d(input_size+hidden_size, hidden_size, kernel_size, padding=padding)
+        self.reset_gate = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
+        self.update_gate = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
+        self.out_gate = nn.Conv2d(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
 
         nn.init.orthogonal_(self.reset_gate.weight)
         nn.init.orthogonal_(self.update_gate.weight)
@@ -25,9 +26,9 @@ class ConvGRUCell(nn.Module):
     def forward(self, input_tensor, hidden_state):
         if hidden_state is None:
             B, C, *spatial_dim = input_tensor.size()
-            hidden_state = torch.zeros([B,self.hidden_size,*spatial_dim]).cuda()
+            hidden_state = torch.zeros([B, self.hidden_size, *spatial_dim]).cuda()
         # [B, C, H, W]
-        combined = torch.cat([input_tensor, hidden_state], dim=1) #concat in C
+        combined = torch.cat([input_tensor, hidden_state], dim=1)  # concat in C
         update = torch.sigmoid(self.update_gate(combined))
         reset = torch.sigmoid(self.reset_gate(combined))
         out = torch.tanh(self.out_gate(torch.cat([input_tensor, hidden_state * reset], dim=1)))
@@ -37,6 +38,7 @@ class ConvGRUCell(nn.Module):
 
 class ConvGRU(nn.Module):
     ''' Initialize a multi-layer Conv GRU '''
+
     def __init__(self, input_size, hidden_size, kernel_size, num_layers, dropout=0.1):
         super(ConvGRU, self).__init__()
         self.input_size = input_size
@@ -55,10 +57,9 @@ class ConvGRU(nn.Module):
 
             setattr(self, name, cell)
             cell_list.append(getattr(self, name))
-        
+
         self.cell_list = nn.ModuleList(cell_list)
         self.dropout_layer = nn.Dropout(p=dropout)
-
 
     def forward(self, x, hidden_state=None):
         [B, seq_len, *_] = x.size()
@@ -66,7 +67,7 @@ class ConvGRU(nn.Module):
         if hidden_state is None:
             hidden_state = [None] * self.num_layers
         # input: image sequences [B, T, C, H, W]
-        current_layer_input = x 
+        current_layer_input = x
         del x
 
         last_state_list = []
@@ -75,7 +76,7 @@ class ConvGRU(nn.Module):
             cell_hidden = hidden_state[idx]
             output_inner = []
             for t in range(seq_len):
-                cell_hidden = self.cell_list[idx](current_layer_input[:,t,:], cell_hidden)
+                cell_hidden = self.cell_list[idx](current_layer_input[:, t, :], cell_hidden)
                 cell_hidden = self.dropout_layer(cell_hidden)  # dropout in each time step
                 output_inner.append(cell_hidden)
 
@@ -87,10 +88,3 @@ class ConvGRU(nn.Module):
         last_state_list = torch.stack(last_state_list, dim=1)
 
         return layer_output, last_state_list
-
-
-if __name__ == '__main__':
-    crnn = ConvGRU(input_size=10, hidden_size=20, kernel_size=3, num_layers=2)
-    data = torch.randn(4, 5, 10, 6, 6) # [B, seq_len, C, H, W], temporal axis=1
-    output, hn = crnn(data)
-    import ipdb; ipdb.set_trace()

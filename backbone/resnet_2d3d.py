@@ -1,14 +1,14 @@
-## modified from https://github.com/kenshohara/3D-ResNets-PyTorch
+""" modified from https://github.com/kenshohara/3D-ResNets-PyTorch """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-import math
 
 __all__ = [
     'ResNet2d3d_full', 'resnet18_2d3d_full', 'resnet34_2d3d_full', 'resnet50_2d3d_full', 'resnet101_2d3d_full',
     'resnet152_2d3d_full', 'resnet200_2d3d_full',
 ]
+
 
 def conv3x3x3(in_planes, out_planes, stride=1, bias=False):
     # 3x3x3 convolution with padding
@@ -20,14 +20,15 @@ def conv3x3x3(in_planes, out_planes, stride=1, bias=False):
         padding=1,
         bias=bias)
 
+
 def conv1x3x3(in_planes, out_planes, stride=1, bias=False):
     # 1x3x3 convolution with padding
     return nn.Conv3d(
         in_planes,
         out_planes,
-        kernel_size=(1,3,3),
-        stride=(1,stride,stride),
-        padding=(0,1,1),
+        kernel_size=(1, 3, 3),
+        stride=(1, stride, stride),
+        padding=(0, 1, 1),
         bias=bias)
 
 
@@ -57,7 +58,7 @@ class BasicBlock3d(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3x3(planes, planes, bias=bias)
         self.bn2 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.downsample = downsample
         self.stride = stride
 
@@ -90,11 +91,11 @@ class BasicBlock2d(nn.Module):
         self.use_final_relu = use_final_relu
         self.conv1 = conv1x3x3(inplanes, planes, stride, bias=bias)
         self.bn1 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv1x3x3(planes, planes, bias=bias)
         self.bn2 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.downsample = downsample
         self.stride = stride
 
@@ -126,13 +127,13 @@ class Bottleneck3d(nn.Module):
         self.use_final_relu = use_final_relu
         self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=bias)
         self.bn1 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.conv2 = nn.Conv3d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=bias)
         self.bn2 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.conv3 = nn.Conv3d(planes, planes * 4, kernel_size=1, bias=bias)
         self.bn3 = nn.BatchNorm3d(planes * 4, track_running_stats=track_running_stats)
-        
+
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -169,13 +170,14 @@ class Bottleneck2d(nn.Module):
         self.use_final_relu = use_final_relu
         self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=bias)
         self.bn1 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
-        self.conv2 = nn.Conv3d(planes, planes, kernel_size=(1,3,3), stride=(1,stride,stride), padding=(0,1,1), bias=bias)
+
+        self.conv2 = nn.Conv3d(planes, planes, kernel_size=(1, 3, 3), stride=(1, stride, stride), padding=(0, 1, 1),
+                               bias=bias)
         self.bn2 = nn.BatchNorm3d(planes, track_running_stats=track_running_stats)
-        
+
         self.conv3 = nn.Conv3d(planes, planes * 4, kernel_size=1, bias=bias)
         self.bn3 = nn.BatchNorm3d(planes * 4, track_running_stats=track_running_stats)
-        
+
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -209,11 +211,11 @@ class ResNet2d3d_full(nn.Module):
         self.inplanes = 64
         self.track_running_stats = track_running_stats
         bias = False
-        self.conv1 = nn.Conv3d(3, 64, kernel_size=(1,7,7), stride=(1, 2, 2), padding=(0, 3, 3), bias=bias)
+        self.conv1 = nn.Conv3d(3, 64, kernel_size=(1, 7, 7), stride=(1, 2, 2), padding=(0, 3, 3), bias=bias)
         self.bn1 = nn.BatchNorm3d(64, track_running_stats=track_running_stats)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1))
-        
+
         if not isinstance(block, list):
             block = [block] * 4
 
@@ -240,21 +242,22 @@ class ResNet2d3d_full(nn.Module):
                 customized_stride = stride
 
             downsample = nn.Sequential(
-                nn.Conv3d(self.inplanes, planes * block.expansion, kernel_size=1, stride=customized_stride, bias=False), 
+                nn.Conv3d(self.inplanes, planes * block.expansion, kernel_size=1, stride=customized_stride, bias=False),
                 nn.BatchNorm3d(planes * block.expansion, track_running_stats=self.track_running_stats)
-                )
+            )
 
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample, track_running_stats=self.track_running_stats))
         self.inplanes = planes * block.expansion
-        if is_final: # if is final block, no ReLU in the final output
-            for i in range(1, blocks-1):
+        if is_final:  # if is final block, no ReLU in the final output
+            for i in range(1, blocks - 1):
                 layers.append(block(self.inplanes, planes, track_running_stats=self.track_running_stats))
-            layers.append(block(self.inplanes, planes, track_running_stats=self.track_running_stats, use_final_relu=False))
+            layers.append(
+                block(self.inplanes, planes, track_running_stats=self.track_running_stats, use_final_relu=False))
         else:
             for i in range(1, blocks):
                 layers.append(block(self.inplanes, planes, track_running_stats=self.track_running_stats))
-                
+
         return nn.Sequential(*layers)
 
     def forward(self, x):
@@ -263,9 +266,9 @@ class ResNet2d3d_full(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
 
-        x = self.layer1(x) 
-        x = self.layer2(x) 
-        x = self.layer3(x) 
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
         x = self.layer4(x)
 
         return x
@@ -274,38 +277,43 @@ class ResNet2d3d_full(nn.Module):
 ## full resnet
 def resnet18_2d3d_full(**kwargs):
     '''Constructs a ResNet-18 model. '''
-    model = ResNet2d3d_full([BasicBlock2d, BasicBlock2d, BasicBlock3d, BasicBlock3d], 
-                   [2, 2, 2, 2], **kwargs)
+    model = ResNet2d3d_full([BasicBlock2d, BasicBlock2d, BasicBlock3d, BasicBlock3d],
+                            [2, 2, 2, 2], **kwargs)
     return model
+
 
 def resnet34_2d3d_full(**kwargs):
     '''Constructs a ResNet-34 model. '''
-    model = ResNet2d3d_full([BasicBlock2d, BasicBlock2d, BasicBlock3d, BasicBlock3d], 
-                   [3, 4, 6, 3], **kwargs)
+    model = ResNet2d3d_full([BasicBlock2d, BasicBlock2d, BasicBlock3d, BasicBlock3d],
+                            [3, 4, 6, 3], **kwargs)
     return model
+
 
 def resnet50_2d3d_full(**kwargs):
     '''Constructs a ResNet-50 model. '''
-    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d], 
-                   [3, 4, 6, 3], **kwargs)
+    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d],
+                            [3, 4, 6, 3], **kwargs)
     return model
+
 
 def resnet101_2d3d_full(**kwargs):
     '''Constructs a ResNet-101 model. '''
-    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d], 
-                   [3, 4, 23, 3], **kwargs)
+    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d],
+                            [3, 4, 23, 3], **kwargs)
     return model
+
 
 def resnet152_2d3d_full(**kwargs):
     '''Constructs a ResNet-101 model. '''
-    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d], 
-                   [3, 8, 36, 3], **kwargs)
+    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d],
+                            [3, 8, 36, 3], **kwargs)
     return model
+
 
 def resnet200_2d3d_full(**kwargs):
     '''Constructs a ResNet-101 model. '''
-    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d], 
-                   [3, 24, 36, 3], **kwargs)
+    model = ResNet2d3d_full([Bottleneck2d, Bottleneck2d, Bottleneck3d, Bottleneck3d],
+                            [3, 24, 36, 3], **kwargs)
     return model
 
 
@@ -313,5 +321,7 @@ if __name__ == '__main__':
     mymodel = resnet18_2d3d_full()
     mydata = torch.FloatTensor(4, 3, 16, 128, 128)
     nn.init.normal_(mydata)
-    import ipdb; ipdb.set_trace()
+    import ipdb;
+
+    ipdb.set_trace()
     mymodel(mydata)

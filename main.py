@@ -1,7 +1,6 @@
 import argparse
 import os
 import random
-import re
 import warnings
 from datetime import datetime
 
@@ -31,7 +30,7 @@ def get_args():
     parser.add_argument('--prefix', default='tmp', type=str, help='prefix of checkpoint filename')
     # Model
     parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
-    parser.add_argument('--hyperbolic_version', default=1, type=int)
+    parser.add_argument('--hyperbolic_version', default=1, type=int, help='Controls what layers we make hyperbolic')
     parser.add_argument('--resume', default='', type=str, help='path of model to resume')
     parser.add_argument('--pretrain', default='', type=str,
                         help='path of pretrained model. Difference with resume is that we start a completely new '
@@ -47,8 +46,6 @@ def get_args():
     parser.add_argument('--not_track_running_stats', action='store_true', help='For the resnet')
     # Loss
     parser.add_argument('--distance', type=str, default='regular', help='Operation on top of the distance (hyperbolic)')
-    parser.add_argument('--hyp_cone', action='store_true', help='Hyperbolic cone')
-    parser.add_argument('--margin', default=0.1, type=float, help='margin for entailment cone loss')
     parser.add_argument('--early_action', action='store_true', help='Train with early action recognition loss')
     parser.add_argument('--early_action_self', action='store_true',
                         help='Only applies when early_action. Train without labels')
@@ -63,7 +60,7 @@ def get_args():
     parser.add_argument('--test_info', default='compute_accuracy', type=str, help='Test to perform')
     parser.add_argument('--no_spatial', action='store_true', help='Mean pool spatial dimensions')
     # Data
-    parser.add_argument('--dataset', default='ucf101', type=str)
+    parser.add_argument('--dataset', default='kinetics', type=str)
     parser.add_argument('--seq_len', default=5, type=int, help='Number of frames in each video block')
     parser.add_argument('--num_seq', default=8, type=int, help='Number of video blocks')
     parser.add_argument('--ds', default=3, type=int, help='Frame downsampling rate')
@@ -73,8 +70,7 @@ def get_args():
                         help='As opposed to subaction level. If True, we do not evaluate subactions or hierarchies')
     parser.add_argument('--img_dim', default=128, type=int)
     parser.add_argument('--path_dataset', type=str, default='')
-    parser.add_argument('--viz', action='store_true',
-                        help='Visualization mode. Return more data from the dataset, shuffle it, etc.')
+    parser.add_argument('--path_data_info', type=str, default='')
     # Training
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
@@ -104,8 +100,6 @@ def get_args():
 
     if args.use_labels:
         assert args.pred_step == 0, 'We want to predict a label, not a feature'
-
-    assert not (args.hyp_cone and not args.hyperbolic), 'Hyperbolic cone only works in hyperbolic mode'
 
     if args.early_action and not args.early_action_self:
         assert args.use_labels
@@ -215,7 +209,8 @@ def main():
     loaders = {split:
                    datasets.get_data(args, split, return_label=args.use_labels,
                                      hierarchical_label=args.hierarchical_labels, action_level_gt=args.action_level_gt,
-                                     num_workers=args.num_workers, path_dataset=args.path_dataset)
+                                     num_workers=args.num_workers, path_dataset=args.path_dataset,
+                                     path_data_info=args.path_data_info)
                for split in splits}
 
     # setup tools

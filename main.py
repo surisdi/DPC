@@ -80,6 +80,7 @@ def get_args():
     parser.add_argument('--reset_lr', action='store_true', help='Reset learning rate when resume training?')
     parser.add_argument('--partial', default=1., type=float, help='Percentage of training set to use')
     # Other
+    parser.add_argument('--path_logs', type=str, default='logs', help='Path to store logs and checkpoints')
     parser.add_argument('--print_freq', default=5, type=int, help='Frequency of printing output during training')
     parser.add_argument('--verbose', action='store_true', help='Print information')
     parser.add_argument('--debug', action='store_true', help='Debug. Do not store results')
@@ -237,7 +238,7 @@ def set_path(args):
         exp_path = os.path.dirname(os.path.dirname(args.resume))
     else:
         current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-        exp_path = f"logs/log_{args.prefix}/{current_time}"
+        exp_path = os.path.join(args.path_logs, f"log_{args.prefix}/{current_time}")
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
     if args.local_rank <= 0 and not args.debug and not args.test:

@@ -32,4 +32,5 @@ CUDA_VISIBLE_DEVICES=0 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
   --test \
   --num_workers 8 \
   --seed 0 \
-  --path_dataset /path/to/datasets/FineGym
+  --path_dataset /path/to/datasets/FineGym \
+  --path_data_info /path/to/data/info

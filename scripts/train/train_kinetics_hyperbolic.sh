@@ -23,5 +23,6 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
   --num_workers 15 \
   --lr 0.001 \
   --prefix train_kinetics_hyperbolic \
-  --path_dataset /path/to/datasets/Kinetics600
+  --path_dataset /path/to/datasets/Kinetics600 \
+  --path_data_info /path/to/data/info
 

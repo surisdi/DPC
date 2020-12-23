@@ -20,4 +20,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
   --cross_gpu_score \
   --lr 0.001 \
   --prefix train_kinetics_euclidean \
-  --path_dataset /path/to/datasets/Kinetics600
+  --path_dataset /path/to/datasets/Kinetics600 \
+  --path_data_info /path/to/data/info

@@ -25,4 +25,5 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
   --prefix finetune_self_finegym_hyperbolic \
   --cross_gpu_score \
   --pretrain /path/to/pretrained/on/kinetics/checkpoint.pth.tar \
-  --path_dataset /path/to/datasets/FineGym/
+  --path_dataset /path/to/datasets/FineGym/ \
+  --path_data_info /path/to/data/info

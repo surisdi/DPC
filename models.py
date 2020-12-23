@@ -90,7 +90,7 @@ class Model(nn.Module):
         self.relu = nn.ReLU(inplace=False)
         self._initialize_weights(self.agg)
 
-    def forward(self, block, labels=None):
+    def forward(self, block, labels=None, extract_features=False):
         a = time.time()
         # block: [B, N, C, SL, W, H]
         (B, N, C, SL, H, W) = block.shape

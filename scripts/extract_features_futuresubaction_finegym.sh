@@ -22,7 +22,7 @@ main.py \
 --prefix test_future_subaction_linear_finegym_kinetics \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_lr2/20201031_182603/model/model_best_epoch46.pth.tar \
+--pretrain /proj/vondrick/shared/hypvideo/logs/log_future_subaction_linear_finegym_kinetics_fromfinetune_lr2/20201031_182603/model/model_best_epoch46.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 307 \
 --hierarchical_labels \

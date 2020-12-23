@@ -242,7 +242,7 @@ def set_path(args):
         exp_path = os.path.dirname(os.path.dirname(args.resume))
     else:
         current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-        exp_path = f"logs/log_{args.prefix}/{current_time}"
+        exp_path = f"/proj/vondrick/shared/hypvideo/logs/log_{args.prefix}/{current_time}"
     img_path = os.path.join(exp_path, 'img')
     model_path = os.path.join(exp_path, 'model')
     if args.local_rank <= 0 and not args.debug and not args.test:

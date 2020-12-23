@@ -164,7 +164,7 @@ class Trainer:
 
     def extract_features(self):
 
-        split_extract = 'test'
+        split_extract = 'train'
 
         name_dataset = 'finegym' if 'FineGym' in self.args.path_dataset else'hollywood2'
 

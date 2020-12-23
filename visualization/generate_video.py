@@ -15,11 +15,14 @@ from moviepy.editor import VideoFileClip
 import generate_tree_video
 
 
-def main():
+def main(dataset, split):
     # Paths
-    dataset = 'hollywood2'  # 'finegym'
-    split = 'test'  # 'val', 'train'
-    path_data = f'/proj/vondrick/didac/results/extracted_features_{dataset}_{split}.pth'
+    dataset = 'hollywood2' if dataset == '' else dataset # 'finegym'
+    split = 'test' if split == '' else split  # 'val', 'train'
+    corrected = True
+
+    print([dataset, split], flush=True)
+    path_data = f'/proj/vondrick/didac/results/extracted_features_{dataset}_{split}{"_corrected" if corrected else ""}.pth'
 
     a = torch.load(path_data, map_location=torch.device('cpu'))
 
@@ -27,8 +30,9 @@ def main():
 
     folder_final_video = f'/proj/vondrick/shared/hypvideo/created_videos/{dataset}/{split}'
     os.makedirs(folder_final_video, exist_ok=True)
-    max_videos = 5
+    max_videos = 200
     for index in indexes_good[:max_videos]:
+        print(f'Starting video {index}')
         event_name = a[5][index][:-12] if dataset == "finegym" else a[5][index].split('/')[-1]
         path_final_video = os.path.join(folder_final_video, f"{index}_{event_name}.mp4")
 
@@ -388,7 +392,14 @@ def create_video_index(index, a, dataset, path_final_video):
 
 
 if __name__ == '__main__':
-    main()
+    args = sys.argv[1:]
+    dataset = ''
+    split = ''
+    if len(args) > 0:
+        dataset = args[0]
+    if len(args) > 1:
+        split = args[1]
+    main(dataset, split)
 
 
 

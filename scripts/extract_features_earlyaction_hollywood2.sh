@@ -21,7 +21,7 @@ main.py \
 --prefix earlyaction_linear_hollywood2_movienet_fromfinetune_lr2 \
 --fp16 \
 --fp64_hyper \
---pretrain logs/log_earlyaction_linear_hollywood2_movienet_fromfinetune_lr2/20201106_191448/model/model_best_epoch47.pth.tar \
+--pretrain /proj/vondrick/shared/hypvideo/logs/log_earlyaction_linear_hollywood2_movienet_fromfinetune_lr2/20201106_191448/model/model_best_epoch47.pth.tar \
 --linear_input predictions_z_hat \
 --n_classes 17 \
 --use_labels \

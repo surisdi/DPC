@@ -4,6 +4,7 @@ import torch
 import utils.utils as utils
 from datasets import sizes_hierarchy as sh
 from utils.poincare_distance import poincare_distance
+# from utils.box_embeddings import box_distance
 
 
 def compute_loss(args, feature_dist, pred, labels, target, sizes_pred, sizes_mask, B):
@@ -47,6 +48,7 @@ def compute_supervised_loss(args, pred, labels, B):  # , top_down=False, separat
                 gt = labels.view(-1).to(args.device)
         else:  # Option 1
             gt = labels.to(args.device)
+
         loss = torch.nn.functional.cross_entropy(pred, gt, ignore_index=-1)
 
         accuracies = (torch.argmax(pred, dim=1) == gt).float()
@@ -108,11 +110,18 @@ def compute_selfsupervised_loss(args, pred, feature_dist, target, sizes_pred, si
     # score is a 6d tensor: [B, P, SQ, B2, N, SQ]
     # similarity matrix is computed inside each gpu, thus here B == num_gpu * B2
     score_flattened = score.view(B * NP * SQ, B2 * NS * SQ)
-    target_flattened = target.view(B * NP * SQ, B2 * NS * SQ)
-    target_flattened = target_flattened.float().argmax(dim=1)
 
-    loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened)
-    top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened, (1, 3, 5))
+    target_flattened = target.reshape(B * NP * SQ, B2 * NS * SQ)
+
+    if args.no_hard_negs:
+        ignore_score_mask = ((target_flattened == -1) | (target_flattened == -3))
+        score_flattened = score_flattened*~ignore_score_mask + ignore_score_mask*1e-12
+
+    target_flattened = target_flattened == 1
+    target_flattened_labels = target_flattened.float().argmax(dim=1)
+
+    loss = torch.nn.functional.cross_entropy(score_flattened, target_flattened_labels)
+    top1, top3, top5 = utils.calc_topk_accuracy(score_flattened, target_flattened_labels, (1, 3, 5))
 
     results = top1, top3, top5, loss.item(), B
 
@@ -130,6 +139,9 @@ def compute_scores(args, pred, feature_dist, sizes, B):
             score = torch.cosh(score).pow(2)
         score = - score.float()
         score = score.view(B, size_pred, last_size ** 2, B, size_gt, last_size ** 2)
+
+    elif args.box:
+        score = box_distance(pred, feature_dist)
 
     else:  # euclidean dot product
         # pred: [B, pred_step, D, last_size, last_size]
@@ -175,10 +187,10 @@ def compute_mask(args, sizes, B):
     # dot product is computed in parallel gpus, so get less easy neg, bounded by batch size in each gpu'''
     # mask meaning: -2: omit, -1: temporal neg (hard), 0: easy neg, 1: pos, -3: spatial neg
     (B, NP, SQ, B2, NS, _) = mask.size()  # [B, P, SQ, B, N, SQ]
-    target = mask == 1
-    target.requires_grad = False
+    # target = mask == 1
+    # target.requires_grad = False
 
-    return target, (B, B2, NS, NP, SQ)
+    return mask, (B, B2, NS, NP, SQ)
 
 
 def bookkeeping(args, avg_meters, results):

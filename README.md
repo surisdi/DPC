@@ -54,3 +54,6 @@ To resume training or to pretrain from one of these pretrained models, add the p
 
 In case there is any doubt or problem, feel free to send us an email.
 
+
+You will have to download the code for box embeddings from [this link](https://github.com/iesl/box-embeddings), and 
+put it in a folder called `box-embeddings` just under the root of this project.

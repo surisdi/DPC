@@ -33,9 +33,6 @@ def pil_loader(path):
 
 
 class Kinetics600(data.Dataset):
-    """
-    This class expects the video frames to be extracted as .jpg files under path_dataset/split/class_name/video_id/*.jpg
-    """
     def __init__(self,
                  mode='train',
                  transform=None,
@@ -89,10 +86,6 @@ class Kinetics600(data.Dataset):
             self.video_info = self.video_info.sample(1000, random_state=666)
         # shuffle not necessary because use RandomSampler
 
-        path_folders = os.path.join(self.path_dataset, mode)
-        valid_folders = [text for text in os.listdir(path_folders) if os.path.isdir(os.path.join(path_folders, text))]
-        self.label_to_id = {text: i for i, text in enumerate(valid_folders)}
-
     def idx_sampler(self, vlen, vpath):
         '''sample index from a video'''
         if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
@@ -114,18 +107,14 @@ class Kinetics600(data.Dataset):
         assert idx_block.shape == (self.num_seq, self.seq_len)
         idx_block = idx_block.reshape(self.num_seq * self.seq_len)
 
-        seq = [pil_loader(os.path.join(self.path_dataset, vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
+        seq = [pil_loader(os.path.join(vpath, 'image_%05d.jpg' % (i + 1))) for i in idx_block]
         t_seq = self.transform(seq)  # apply same transform
         (C, H, W) = t_seq[0].size()
         t_seq = torch.stack(t_seq, 0)
         t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-
-        label_text = vpath.split('/')[-2]
-        label = self.label_to_id[label_text]
-
         if self.return_idx:
-            return t_seq, label, index
-        return t_seq, label
+            return t_seq, 0, index
+        return t_seq, 0  # placeholder for labels, need implement
 
     def __len__(self):
         return len(self.video_info)
@@ -190,7 +179,7 @@ class Hollywood2(data.Dataset):
         # Read action and index
         self.dict_labels = {}
         self.dict_labels_hier = {}
-        label_path = os.path.join(self.path_dataset, 'class_Ind')
+        label_path = os.path.join(self.path_dataset, 'hollywood2/class_Ind')
         with open(os.path.join(label_path, 'class_Ind.txt'), 'r') as f:
             for line in f:
                 action, label = line.split()
@@ -344,7 +333,7 @@ class FineGym(data.Dataset):
                 self.super_classes[subclass] = (superclass_parent_idx, superclass_grand_idx)
 
         clips = []
-        for root, dirs, files in os.walk(os.path.join('/proj/vondrick/datasets/FineGym', 'event_videos')):
+        for root, dirs, files in os.walk(os.path.join(path_dataset, 'event_videos')):
             # We look at this folder instead of self.annotations because not all videos are downloaded for now
             for file in files:
                 clips.append(file.replace('.mp4', ''))
@@ -469,101 +458,6 @@ class FineGym(data.Dataset):
         return len(self.clips)
 
 
-class UCF101(data.Dataset):
-    def __init__(self,
-                 mode='train',
-                 path_dataset='',
-                 transform=None,
-                 seq_len=10,
-                 num_seq=5,
-                 downsample=3,
-                 epsilon=5,
-                 which_split=1,
-                 return_label=False):
-
-        self.path_dataset = path_dataset
-        self.mode = mode
-        self.transform = transform
-        self.seq_len = seq_len
-        self.num_seq = num_seq
-        self.downsample = downsample
-        self.epsilon = epsilon
-        self.which_split = which_split
-        self.return_label = return_label
-
-        split = os.path.join(self.path_dataset, 'dpc_split',
-                             f'{"test" if mode != "train" else "train"}_split{which_split:02d}_split_hdd.csv')
-        video_info = pd.read_csv(split, header=None)
-
-        # get action list
-        self.action_dict_encode = {}
-        self.action_dict_decode = {}
-        action_file = os.path.join(self.path_dataset, 'ucfTrainTestlist', 'classInd.txt')
-        action_df = pd.read_csv(action_file, sep=' ', header=None)
-        for _, row in action_df.iterrows():
-            act_id, act_name = row
-            self.action_dict_decode[act_id] = act_name
-            self.action_dict_encode[act_name] = act_id
-
-        # filter out too short videos:
-        drop_idx = []
-        for idx, row in video_info.iterrows():
-            vpath, vlen = row
-            if vlen - self.num_seq * self.seq_len * self.downsample <= 0:
-                drop_idx.append(idx)
-        self.video_info = video_info.drop(drop_idx, axis=0)
-
-        if mode == 'val': self.video_info = self.video_info.sample(frac=0.3)
-        # shuffle not required due to external sampler
-
-    def idx_sampler(self, vlen, vpath):
-        '''sample index from a video'''
-        if vlen - self.num_seq * self.seq_len * self.downsample <= 0: return [None]
-        n = 1
-        start_idx = np.random.choice(range(vlen - self.num_seq * self.seq_len * self.downsample), n)
-        seq_idx = np.expand_dims(np.arange(self.num_seq), -1) * self.downsample * self.seq_len + start_idx
-        seq_idx_block = seq_idx + np.expand_dims(np.arange(self.seq_len), 0) * self.downsample
-        return [seq_idx_block, vpath]
-
-    def __getitem__(self, index):
-        vpath, vlen = self.video_info.iloc[index]
-        items = self.idx_sampler(vlen, vpath)
-        if items is None: print(vpath)
-
-        idx_block, vpath = items
-        assert idx_block.shape == (self.num_seq, self.seq_len)
-        idx_block = idx_block.reshape(self.num_seq * self.seq_len)
-
-        seq = [pil_loader(os.path.join(vpath, f'{i}.jpg')) for i in idx_block]
-        t_seq = self.transform(seq)  # apply same transform
-
-        (C, H, W) = t_seq[0].size()
-        t_seq = torch.stack(t_seq, 0)
-        t_seq = t_seq.view(self.num_seq, self.seq_len, C, H, W).transpose(1, 2)
-
-        if self.return_label:
-            try:
-                vname = vpath.split('/')[-3]
-                label = self.encode_action(vname)-1
-            except:
-                vname = vpath.split('/')[-2]
-                label = self.encode_action(vname)-1
-            return t_seq, label
-
-        return t_seq
-
-    def __len__(self):
-        return len(self.video_info)
-
-    def encode_action(self, action_name):
-        '''give action name, return action code'''
-        return self.action_dict_encode[action_name]
-
-    def decode_action(self, action_code):
-        '''give action code, return action name'''
-        return self.action_dict_decode[action_code]
-
-
 class MovieNet(data.Dataset):
     def __init__(self, mode='train', transform=None, num_seq=5, path_dataset='', path_data_info=''):
         self.path_dataset = path_dataset
@@ -628,7 +522,7 @@ class MovieNet(data.Dataset):
         return len(self.subclip_seqs)
 
 
-def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False,
+def get_data(args, mode='train', return_label=False, hierarchical_label=False, action_level_gt=False, \
              num_workers=0, path_dataset='', path_data_info=''):
     if hierarchical_label and args.dataset not in ['finegym', 'hollywood2']:
         raise Exception('Hierarchical information is only implemented in finegym and hollywood2 datasets')
@@ -692,16 +586,6 @@ def get_data(args, mode='train', return_label=False, hierarchical_label=False, a
         assert args.seq_len == 3, 'We only have 3 frames per subclip/scene, but always 3'
         dataset = MovieNet(mode=mode, transform=transform, num_seq=args.num_seq, path_dataset=path_dataset,
                            path_data_info=path_data_info)
-    elif args.dataset == 'ucf':
-        dataset = UCF101(mode=mode,
-                         path_dataset=path_dataset,
-                         transform=transform,
-                         seq_len=args.seq_len,
-                         num_seq=args.num_seq,
-                         downsample=args.ds,
-                         epsilon=5,
-                         which_split=1,
-                         return_label=return_label)
     else:
         raise ValueError('dataset not supported')
 

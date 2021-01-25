@@ -31,6 +31,7 @@ def get_args():
     # Model
     parser.add_argument('--hyperbolic', action='store_true', help='Hyperbolic mode')
     parser.add_argument('--hyperbolic_version', default=1, type=int, help='Controls what layers we make hyperbolic')
+    parser.add_argument('--box', action='store_true', help='Box embeddings mode')
     parser.add_argument('--resume', default='', type=str, help='path of model to resume')
     parser.add_argument('--pretrain', default='', type=str,
                         help='path of pretrained model. Difference with resume is that we start a completely new '
@@ -59,6 +60,7 @@ def get_args():
     parser.add_argument('--test', action='store_true', help='Test system')
     parser.add_argument('--test_info', default='compute_accuracy', type=str, help='Test to perform')
     parser.add_argument('--no_spatial', action='store_true', help='Mean pool spatial dimensions')
+    parser.add_argument('--no_hard_negs', action='store_true', help='Do not use temporal and spatial negatives')
     # Data
     parser.add_argument('--dataset', default='kinetics', type=str)
     parser.add_argument('--seq_len', default=5, type=int, help='Number of frames in each video block')
@@ -113,6 +115,9 @@ def get_args():
     if args.pred_future:
         assert not args.action_level_gt, 'Predicting the future implies predicting subactions'
         assert args.linear_input != 'features_z', 'We need context from previous frames'
+
+    if args.box:
+        assert not args.hyperbolic
 
     if args.local_rank == -1:
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

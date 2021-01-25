@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+CUDA_VISIBLE_DEVICES=4,5,6,7 PYTORCH_JIT=0 NCCL_LL_THRESHOLD=0 python \
+  -W ignore \
+  -i \
+  -m torch.distributed.launch \
+  --master_port=9989 \
+  --nproc_per_node=4 \
+  main.py \
+  --network_feature resnet18 \
+  --dataset finegym \
+  --batch_size 32 \
+  --img_dim 128 \
+  --epochs 100 \
+  --hyperbolic \
+  --hyperbolic_version 1 \
+  --pred_step 0 \
+  --seq_len 5 \
+  --num_seq 6 \
+  --distance 'squared' \
+  --lr 1e-4 \
+  --prefix future_subaction_linear_finegym_fromfinetune_hyperbolic_onc \
+  --fp16 \
+  --fp64_hyper \
+  --pretrain /proj/vondrick/shared/hypvideo/logs/log_future_subaction_linear_finegym_fromfinetune_hyperbolic_onc/20210125_110946/model/model_best_epoch27.pth.tar \
+  --linear_input predictions_c \
+  --n_classes 307 \
+  --hierarchical_labels \
+  --use_labels \
+  --num_workers 12 \
+  --only_train_linear \
+  --pred_future \
+  --num_workers 8 \
+  --seed 0 \
+  --path_dataset /path/to/datasets/FineGym \
+  --path_data_info /proj/vondrick/shared/hypvideo/dataset_info \
+  --path_logs /proj/vondrick/shared/hypvideo/logs/ \
+  --test
